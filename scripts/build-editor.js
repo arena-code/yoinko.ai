@@ -1,14 +1,18 @@
-// Build TipTap WYSIWYG editor bundle for Notas
+// Build TipTap WYSIWYG editor bundle for yoınko
 // Run: node scripts/build-editor.js
-const { build } = require('esbuild');
-const path = require('path');
+import { build } from 'esbuild';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 build({
-  entryPoints: [path.join(__dirname, 'tiptap-entry.js')],
+  entryPoints: [join(__dirname, 'tiptap-entry.js')],
   bundle: true,
   format: 'iife',
   globalName: 'TipTapBundle',
-  outfile: path.join(__dirname, '../public/js/tiptap.bundle.js'),
+  outfile: join(__dirname, '../public/js/tiptap.bundle.js'),
   minify: process.env.NODE_ENV === 'production',
   sourcemap: false,
   target: ['esnext'],
