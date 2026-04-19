@@ -1,0 +1,47 @@
+{
+  "name": "yoinko",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "yoınko.ai — fewer buttons. more yoınking.",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "concurrently --names \"server,watch\" --prefix-colors \"cyan,magenta\" \"tsx watch src/server/index.ts\" \"node scripts/watch-client.js\"",
+    "start": "node dist/index.js",
+    "build": "npm run build:server && npm run build:client && npm run build:editor",
+    "build:server": "tsc -p tsconfig.server.json",
+    "build:client": "node scripts/build-client.js",
+    "build:editor": "node scripts/build-editor.js",
+    "typecheck": "tsc --noEmit -p tsconfig.server.json && tsc --noEmit -p tsconfig.client.json"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@google/generative-ai": "^0.24.0",
+    "@tiptap/core": "^3.22.4",
+    "@tiptap/extension-placeholder": "^3.22.4",
+    "@tiptap/extension-task-item": "^3.22.4",
+    "@tiptap/extension-task-list": "^3.22.4",
+    "@tiptap/starter-kit": "^3.22.4",
+    "better-sqlite3": "^11.9.1",
+    "cors": "^2.8.5",
+    "esbuild": "^0.28.0",
+    "express": "^4.21.2",
+    "multer": "^1.4.5-lts.2",
+    "openai": "^4.91.1",
+    "uuid": "^11.1.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/multer": "^2.1.0",
+    "@types/node": "^25.6.0",
+    "@types/uuid": "^10.0.0",
+    "chokidar": "^5.0.0",
+    "concurrently": "^9.2.1",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3"
+  }
+}
