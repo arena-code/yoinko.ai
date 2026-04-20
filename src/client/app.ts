@@ -14,6 +14,10 @@ interface TipTapBundle {
   TaskList: unknown;
   TaskItem: { configure: (opts: Record<string, unknown>) => unknown };
   Placeholder: { configure: (opts: Record<string, unknown>) => unknown };
+  Table: { configure: (opts: Record<string, unknown>) => unknown };
+  TableRow: unknown;
+  TableCell: unknown;
+  TableHeader: unknown;
 }
 
 interface TipTapDoc {
@@ -65,7 +69,7 @@ declare global {
   }
 
   // Marked declared as global from CDN script tag
-  const marked: { parse: (text: string, opts?: { async?: boolean }) => string | Promise<string> };
+  const marked: { parse: (text: string, opts?: { async?: boolean; gfm?: boolean; breaks?: boolean }) => string | Promise<string>; use: (opts: object) => void; };
 }
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -147,6 +151,11 @@ async function init(): Promise<void> {
   window.openRenameProjectModal = openRenameProjectModal;
   window.closeRenameProjectModal = closeRenameProjectModal;
   window.submitRenameProject = submitRenameProject;
+  // Enable GFM (tables, strikethrough, task lists) globally
+  if (typeof marked !== 'undefined') {
+    marked.use({ gfm: true });
+  }
+
   window.toggleProjectMenu = () => {
     const menu = document.getElementById('project-menu');
     if (menu) menu.classList.toggle('open');
@@ -678,6 +687,24 @@ function tiptapToMarkdown(doc: TipTapDoc): string {
     }
     if (t === 'hardBreak') return '  \n';
     if (t === 'text') return node.text || '';
+    if (t === 'table') {
+      // Each tableRow → one Markdown row; first row gets a separator after it
+      const rows = c.map((row, rowIdx) => {
+        const cells = (row.content || []).map(cell => {
+          // Collapse all inline content of the cell into a single string
+          const cellText = (cell.content || []).map(n => block(n, '')).join('').replace(/\n/g, ' ').trim();
+          return cellText;
+        });
+        const rowStr = '| ' + cells.join(' | ') + ' |';
+        if (rowIdx === 0) {
+          // Header separator row
+          const sep = '| ' + cells.map(() => '----------').join(' | ') + ' |';
+          return rowStr + '\n' + sep;
+        }
+        return rowStr;
+      });
+      return rows.join('\n') + '\n';
+    }
     return c.map(n => block(n, indent)).join('');
   }
 
@@ -719,7 +746,7 @@ function renderWysiwygEditor(page: PageNode, container: HTMLElement): void {
     return;
   }
 
-  const { Editor, Extension, InputRule, StarterKit, TaskList, TaskItem, Placeholder } = window.TipTapBundle;
+  const { Editor, Extension, InputRule, StarterKit, TaskList, TaskItem, Placeholder, Table, TableRow, TableCell, TableHeader } = window.TipTapBundle;
 
   const TaskBracketRule = Extension.create({
     name: 'taskBracketRule',
@@ -746,6 +773,10 @@ function renderWysiwygEditor(page: PageNode, container: HTMLElement): void {
       TaskList,
       TaskItem.configure({ nested: true }),
       TaskBracketRule,
+      (Table as { configure: (opts: Record<string, unknown>) => unknown }).configure({ resizable: false }),
+      TableRow,
+      TableCell,
+      TableHeader,
       Placeholder.configure({
         placeholder: 'Start writing… Use # for headings, [] for tasks, - for lists',
       }),
@@ -1644,7 +1675,7 @@ function onSearch(): void {
 // ── Markdown render helper ────────────────────────────────────────────────────
 function renderMarkdown(text: string): string {
   if (typeof marked === 'undefined') return `<pre>${esc(text || '')}</pre>`;
-  const result = marked.parse(text || '', { async: false });
+  const result = marked.parse(text || '', { async: false, gfm: true, breaks: false });
   const html = typeof result === 'string' ? result : `<pre>${esc(text || '')}</pre>`;
   // Convert marked's checkbox <li> items into TipTap taskList/taskItem format
   return html

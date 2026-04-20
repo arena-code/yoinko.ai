@@ -143,6 +143,9 @@ var NotasApp = (() => {
     window.openRenameProjectModal = openRenameProjectModal;
     window.closeRenameProjectModal = closeRenameProjectModal;
     window.submitRenameProject = submitRenameProject;
+    if (typeof marked !== "undefined") {
+      marked.use({ gfm: true });
+    }
     window.toggleProjectMenu = () => {
       const menu = document.getElementById("project-menu");
       if (menu) menu.classList.toggle("open");
@@ -606,6 +609,21 @@ ${code}
       }
       if (t === "hardBreak") return "  \n";
       if (t === "text") return node.text || "";
+      if (t === "table") {
+        const rows = c.map((row, rowIdx) => {
+          const cells = (row.content || []).map((cell) => {
+            const cellText = (cell.content || []).map((n) => block(n, "")).join("").replace(/\n/g, " ").trim();
+            return cellText;
+          });
+          const rowStr = "| " + cells.join(" | ") + " |";
+          if (rowIdx === 0) {
+            const sep = "| " + cells.map(() => "----------").join(" | ") + " |";
+            return rowStr + "\n" + sep;
+          }
+          return rowStr;
+        });
+        return rows.join("\n") + "\n";
+      }
       return c.map((n) => block(n, indent)).join("");
     }
     try {
@@ -645,7 +663,7 @@ ${code}
       console.error("TipTapBundle not found on window");
       return;
     }
-    const { Editor, Extension, InputRule, StarterKit, TaskList, TaskItem, Placeholder } = window.TipTapBundle;
+    const { Editor, Extension, InputRule, StarterKit, TaskList, TaskItem, Placeholder, Table, TableRow, TableCell, TableHeader } = window.TipTapBundle;
     const TaskBracketRule = Extension.create({
       name: "taskBracketRule",
       addInputRules() {
@@ -669,6 +687,10 @@ ${code}
         TaskList,
         TaskItem.configure({ nested: true }),
         TaskBracketRule,
+        Table.configure({ resizable: false }),
+        TableRow,
+        TableCell,
+        TableHeader,
         Placeholder.configure({
           placeholder: "Start writing\u2026 Use # for headings, [] for tasks, - for lists"
         })
@@ -1473,7 +1495,7 @@ ${code}
   }
   function renderMarkdown(text) {
     if (typeof marked === "undefined") return `<pre>${esc(text || "")}</pre>`;
-    const result = marked.parse(text || "", { async: false });
+    const result = marked.parse(text || "", { async: false, gfm: true, breaks: false });
     const html = typeof result === "string" ? result : `<pre>${esc(text || "")}</pre>`;
     return html.replace(
       /<ul>\s*(<li>\s*<input[^>]*type="checkbox"[^>]*>[\s\S]*?<\/li>\s*)<\/ul>/g,
