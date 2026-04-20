@@ -1,3 +1,8 @@
+export interface Project {
+    id: string;
+    name: string;
+    created_at: string;
+}
 export interface PageNode {
     id: string;
     path: string;
@@ -56,6 +61,9 @@ export interface ImageResult {
     base64?: string;
     mimeType?: string;
     revised_prompt?: string;
+}
+export interface ProjectsResponse {
+    projects: Project[];
 }
 export interface PagesResponse {
     pages: PageNode[];

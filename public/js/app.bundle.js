@@ -2,11 +2,17 @@
 var NotasApp = (() => {
   // src/client/api.ts
   var API_BASE = "/api";
+  var _currentProjectId = localStorage.getItem("yoinko_project") ?? "default";
+  function getCurrentProjectId() {
+    return _currentProjectId;
+  }
+  function setCurrentProjectId(id) {
+    _currentProjectId = id;
+    localStorage.setItem("yoinko_project", id);
+  }
   async function request(method, path, body, isFormData = false) {
-    const opts = {
-      method,
-      headers: isFormData ? {} : { "Content-Type": "application/json" }
-    };
+    const headers = isFormData ? { "X-Project-Id": _currentProjectId } : { "Content-Type": "application/json", "X-Project-Id": _currentProjectId };
+    const opts = { method, headers };
     if (body !== void 0) {
       opts.body = isFormData ? body : JSON.stringify(body);
     }
@@ -18,6 +24,11 @@ var NotasApp = (() => {
     return res.json();
   }
   var api = {
+    // ── Projects ───────────────────────────────────────────────────────────────
+    listProjects: () => request("GET", "/projects"),
+    createProject: (name) => request("POST", "/projects", { name }),
+    renameProject: (id, name) => request("PATCH", `/projects/${id}`, { name }),
+    deleteProject: (id) => request("DELETE", `/projects/${id}`),
     // ── Pages ──────────────────────────────────────────────────────────────────
     getTree: () => request("GET", "/pages"),
     getFlat: () => request("GET", "/pages/flat"),
@@ -42,7 +53,10 @@ var NotasApp = (() => {
       try {
         const res = await fetch(`${API_BASE}/ai/chat`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "X-Project-Id": _currentProjectId
+          },
           body: JSON.stringify({ messages, page_id: pageId, page_content: pageContent })
         });
         if (!res.ok) {
@@ -79,6 +93,7 @@ var NotasApp = (() => {
   // src/client/app.ts
   var state = {
     pages: [],
+    projects: [],
     currentPageId: null,
     currentPage: null,
     theme: "dark",
@@ -92,12 +107,6 @@ var NotasApp = (() => {
   var $ = (id) => document.getElementById(id);
   var $$ = (sel) => document.querySelectorAll(sel);
   async function init() {
-    await loadSettings();
-    applyTheme(state.theme);
-    await loadPages();
-    setupEventListeners();
-    handleHashRoute();
-    window.addEventListener("hashchange", handleHashRoute);
     window.navigateTo = navigateTo;
     window.openNewPageModal = openNewPageModal;
     window.openLightbox = openLightbox;
@@ -125,6 +134,199 @@ var NotasApp = (() => {
     window.closeLightbox = closeLightbox;
     window.sendChatMessage = sendChatMessage;
     window.toggleChat = toggleChat;
+    window.switchProject = switchProject;
+    window.openCreateProjectModal = openCreateProjectModal;
+    window.closeCreateProjectModal = closeCreateProjectModal;
+    window.submitCreateProject = submitCreateProject;
+    window.deleteProjectConfirm = deleteProjectConfirm;
+    window.closeConfirmDeleteProject = closeConfirmDeleteProject;
+    window.openRenameProjectModal = openRenameProjectModal;
+    window.closeRenameProjectModal = closeRenameProjectModal;
+    window.submitRenameProject = submitRenameProject;
+    window.toggleProjectMenu = () => {
+      const menu = document.getElementById("project-menu");
+      if (menu) menu.classList.toggle("open");
+    };
+    await loadSettings();
+    applyTheme(state.theme);
+    await loadProjects();
+    await loadPages();
+    setupEventListeners();
+    handleHashRoute();
+    window.addEventListener("hashchange", handleHashRoute);
+  }
+  async function loadProjects() {
+    try {
+      const { projects } = await api.listProjects();
+      state.projects = projects;
+      const stored = getCurrentProjectId();
+      if (!projects.find((p) => p.id === stored)) {
+        setCurrentProjectId("default");
+      }
+      renderProjectSwitcher();
+    } catch {
+    }
+  }
+  function renderProjectSwitcher() {
+    const switcher = document.getElementById("project-switcher");
+    if (!switcher) return;
+    const currentId = getCurrentProjectId();
+    const current = state.projects.find((p) => p.id === currentId) ?? state.projects[0];
+    const currentName = current?.name ?? "Default";
+    const initials = (name) => name.slice(0, 2).toUpperCase();
+    const hue = (name) => {
+      let h = 0;
+      for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
+      return h;
+    };
+    const avatarStyle = (name, isDefault) => isDefault ? "" : `style="background: hsl(${hue(name)}, 60%, 48%)"`;
+    switcher.innerHTML = `
+    <button class="project-switcher-btn" onclick="toggleProjectMenu()" title="Switch project">
+      <span class="project-switcher-avatar" ${avatarStyle(currentName, currentId === "default")}>${initials(currentName)}</span>
+      <span class="project-switcher-name">${currentName}</span>
+      <svg class="project-switcher-arrow" viewBox="0 0 20 20" fill="currentColor" width="12" height="12"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+    </button>
+    <div class="project-menu" id="project-menu">
+      <div class="project-menu-label">Workspaces</div>
+      ${state.projects.map((p) => {
+      const isActive = p.id === currentId;
+      return `
+        <div class="project-menu-item${isActive ? " project-menu-item--active" : ""}"
+             role="button" tabindex="0"
+             onclick="switchProject('${p.id}')"
+             onkeydown="if(event.key==='Enter'||event.key===' ')switchProject('${p.id}')">
+          <span class="project-menu-avatar" ${avatarStyle(p.name, p.id === "default")}>${initials(p.name)}</span>
+          <span class="project-menu-item-name">${p.name}</span>
+          ${p.id !== "default" ? `<span class="project-menu-actions">
+                 <button class="project-menu-action-btn"
+                         onclick="event.stopPropagation();openRenameProjectModal('${p.id}','${p.name}')"
+                         title="Rename workspace">
+                   <svg viewBox="0 0 12 12" fill="none" width="11" height="11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                     <path d="M8.5 1.5a1.414 1.414 0 012 2L3.5 10.5l-3 .5.5-3z"/>
+                   </svg>
+                 </button>
+                 <button class="project-menu-action-btn project-menu-action-delete"
+                         onclick="event.stopPropagation();deleteProjectConfirm('${p.id}','${p.name}')"
+                         title="Delete workspace">
+                   <svg viewBox="0 0 10 10" fill="none" width="9" height="9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                     <line x1="1" y1="1" x2="9" y2="9"/><line x1="9" y1="1" x2="1" y2="9"/>
+                   </svg>
+                 </button>
+               </span>` : '<span class="project-menu-spacer"></span>'}
+        </div>`;
+    }).join("")}
+      <div class="project-menu-divider"></div>
+      <div class="project-menu-item project-menu-new"
+           role="button" tabindex="0"
+           onclick="openCreateProjectModal()"
+           onkeydown="if(event.key==='Enter')openCreateProjectModal()">
+        <span class="project-menu-new-icon">+</span>
+        <span>New workspace</span>
+      </div>
+    </div>
+  `;
+  }
+  document.addEventListener("click", (e) => {
+    const menu = document.getElementById("project-menu");
+    const switcher = document.getElementById("project-switcher");
+    if (menu?.classList.contains("open") && !switcher?.contains(e.target)) {
+      menu.classList.remove("open");
+    }
+  });
+  async function switchProject(id) {
+    if (id === getCurrentProjectId()) return;
+    setCurrentProjectId(id);
+    document.getElementById("project-menu")?.classList.remove("open");
+    state.currentPageId = null;
+    state.currentPage = null;
+    state.chatMessages = [];
+    renderProjectSwitcher();
+    await loadPages();
+    $("main-content").innerHTML = '<div class="empty-state"><p>Select a page to get started.</p></div>';
+    showToast(`Switched to ${state.projects.find((p) => p.id === id)?.name ?? id}`);
+  }
+  function openCreateProjectModal() {
+    document.getElementById("project-menu")?.classList.remove("open");
+    const overlay = document.getElementById("create-project-overlay");
+    if (overlay) overlay.classList.add("open");
+    const input = document.getElementById("new-project-name");
+    if (input) {
+      input.value = "";
+      input.focus();
+    }
+  }
+  function closeCreateProjectModal() {
+    document.getElementById("create-project-overlay")?.classList.remove("open");
+  }
+  async function submitCreateProject() {
+    const input = document.getElementById("new-project-name");
+    const name = input?.value?.trim();
+    if (!name) return;
+    try {
+      const { project } = await api.createProject(name);
+      state.projects.push(project);
+      closeCreateProjectModal();
+      await switchProject(project.id);
+    } catch (err) {
+      showToast("Failed to create project: " + err.message, "error");
+    }
+  }
+  var _deleteProjectId = null;
+  async function deleteProjectConfirm(id, name) {
+    _deleteProjectId = id;
+    const confirmed = await showConfirmDelete(name, "Delete workspace?");
+    if (!confirmed) {
+      _deleteProjectId = null;
+      return;
+    }
+    try {
+      await api.deleteProject(id);
+      state.projects = state.projects.filter((p) => p.id !== id);
+      if (getCurrentProjectId() === id) {
+        await switchProject("default");
+      } else {
+        renderProjectSwitcher();
+      }
+      showToast(`"${name}" deleted`);
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+    _deleteProjectId = null;
+  }
+  function closeConfirmDeleteProject(result) {
+    closeConfirmDelete(result);
+  }
+  var _renameProjectId = null;
+  function openRenameProjectModal(id, currentName) {
+    _renameProjectId = id;
+    document.getElementById("project-menu")?.classList.remove("open");
+    const overlay = document.getElementById("rename-project-overlay");
+    if (overlay) overlay.classList.add("open");
+    const input = document.getElementById("rename-project-input");
+    if (input) {
+      input.value = currentName;
+      input.focus();
+      input.select();
+    }
+  }
+  function closeRenameProjectModal() {
+    document.getElementById("rename-project-overlay")?.classList.remove("open");
+    _renameProjectId = null;
+  }
+  async function submitRenameProject() {
+    const input = document.getElementById("rename-project-input");
+    const name = input?.value.trim();
+    if (!name || !_renameProjectId) return;
+    try {
+      const { project } = await api.renameProject(_renameProjectId, name);
+      const idx = state.projects.findIndex((p) => p.id === project.id);
+      if (idx !== -1) state.projects[idx] = project;
+      renderProjectSwitcher();
+      closeRenameProjectModal();
+      showToast(`Renamed to "${name}"`);
+    } catch (err) {
+      showToast(err.message, "error");
+    }
   }
   async function loadSettings() {
     try {
@@ -211,7 +413,7 @@ var NotasApp = (() => {
           <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/>
         </svg>
         <span class="nav-name">${esc(displayName)}</span>
-        ${page.child_count ? `<span class="nav-count">${page.child_count}</span>` : ""}
+
       </div>
       ${hasChildren ? `
         <button class="nav-expand-btn${isExpanded ? " open" : ""}" data-folder-id="${page.id}">
@@ -602,7 +804,7 @@ ${code}
         </div>
         <div class="folder-num">SECTION ${sectionNum}</div>
         <h1 class="folder-title" style="margin:0">${esc(displayName)}</h1>
-        <p class="folder-meta">${children.length} item${children.length !== 1 ? "s" : ""}</p>
+        <p class="folder-meta">${children.length + (page.assets?.length || 0)} item${children.length + (page.assets?.length || 0) !== 1 ? "s" : ""}</p>
       </div>
 
       <div class="section-heading">Contents</div>
@@ -617,7 +819,7 @@ ${code}
                   ${child.type === "folder" ? "\u{1F4C1}" : ext === "html" ? "\u{1F310}" : "\u{1F4DD}"}
                 </div>
                 <div class="child-card-name">${esc(childName)}</div>
-                <div class="child-card-meta">${child.type === "folder" ? `${child.child_count || 0} items` : ext.toUpperCase() || "MD"}</div>
+                <div class="child-card-meta">${child.type === "folder" ? `${state.pages.filter((p) => p.parent_id === child.id).length + (child.asset_count || 0)} items` : ext.toUpperCase() || "MD"}</div>
               </div>
             `;
     }).join("")}
@@ -733,9 +935,11 @@ ${code}
     }
   }
   var _confirmDeleteResolve = null;
-  function showConfirmDelete(filename) {
+  function showConfirmDelete(filename, title = "Delete asset?") {
     return new Promise((resolve) => {
       _confirmDeleteResolve = resolve;
+      const titleEl = document.getElementById("confirm-delete-title");
+      if (titleEl) titleEl.textContent = title;
       const msg = $("confirm-delete-msg");
       if (msg) msg.textContent = filename ? `\u201C${filename}\u201D will be permanently deleted.` : "This action cannot be undone.";
       $("confirm-delete-overlay").classList.add("open");
@@ -1331,10 +1535,18 @@ ${code}
     $("lightbox").addEventListener("click", (e) => {
       if (e.target === $("lightbox")) closeLightbox();
     });
+    $("create-project-overlay").addEventListener("click", (e) => {
+      if (e.target === $("create-project-overlay")) closeCreateProjectModal();
+    });
+    $("rename-project-overlay").addEventListener("click", (e) => {
+      if (e.target === $("rename-project-overlay")) closeRenameProjectModal();
+    });
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
         closeLightbox();
         closeConfirmDelete(false);
+        closeCreateProjectModal();
+        closeRenameProjectModal();
         $("compose-popup").classList.remove("open");
       }
     });

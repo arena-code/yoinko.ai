@@ -1,10 +1,10 @@
 // src/server/ai/index.ts — Unified AI adapter
 // Supports: OpenAI, Google Gemini, Anthropic Claude, OpenAI-Compatible
-import { db } from '../db.js';
+import { globalDb as db } from '../db.js';
 function getSettings() {
     const rows = db.prepare(`SELECT key, value FROM settings`).all();
     const s = {};
-    rows.forEach(r => { s[r.key] = r.value; });
+    rows.forEach((r) => { s[r.key] = r.value; });
     return s;
 }
 // ── Text generation ───────────────────────────────────────────────────────────

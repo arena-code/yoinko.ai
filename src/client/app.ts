@@ -1,6 +1,6 @@
 // src/client/app.ts — Main application logic (filesystem-backed)
-import { api } from './api.js';
-import type { PageNode, Asset, Settings, LLMMessage } from '../shared/types.js';
+import { api, getCurrentProjectId, setCurrentProjectId } from './api.js';
+import type { PageNode, Asset, Settings, LLMMessage, Project } from '../shared/types.js';
 
 // ── TipTap bundle type declaration ────────────────────────────────────────────
 interface TipTapBundle {
@@ -55,6 +55,13 @@ declare global {
     closeLightbox: () => void;
     sendChatMessage: () => void;
     toggleChat: () => void;
+    switchProject: (id: string) => void;
+    openCreateProjectModal: () => void;
+    closeCreateProjectModal: () => void;
+    submitCreateProject: () => void;
+    deleteProjectConfirm: (id: string, name: string) => void;
+    closeConfirmDeleteProject: (result: boolean) => void;
+    toggleProjectMenu: () => void;
   }
 
   // Marked declared as global from CDN script tag
@@ -68,6 +75,7 @@ interface NavPageNode extends PageNode {
 
 interface AppState {
   pages: PageNode[];
+  projects: Project[];
   currentPageId: string | null;
   currentPage: PageNode | null;
   theme: string;
@@ -83,6 +91,7 @@ interface AppState {
 
 const state: AppState = {
   pages: [],
+  projects: [],
   currentPageId: null,
   currentPage: null,
   theme: 'dark',
@@ -100,14 +109,8 @@ const $$ = (sel: string): NodeListOf<HTMLElement> => document.querySelectorAll(s
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function init(): Promise<void> {
-  await loadSettings();
-  applyTheme(state.theme);
-  await loadPages();
-  setupEventListeners();
-  handleHashRoute();
-  window.addEventListener('hashchange', handleHashRoute);
-
-  // Expose functions that are called from inline HTML attribute handlers
+  // Register all inline-onclick globals FIRST so they're available regardless of
+  // whether loadPages / setupEventListeners throws later.
   window.navigateTo = navigateTo;
   window.openNewPageModal = openNewPageModal;
   window.openLightbox = openLightbox;
@@ -135,6 +138,230 @@ async function init(): Promise<void> {
   window.closeLightbox = closeLightbox;
   window.sendChatMessage = sendChatMessage;
   window.toggleChat = toggleChat;
+  window.switchProject = switchProject;
+  window.openCreateProjectModal = openCreateProjectModal;
+  window.closeCreateProjectModal = closeCreateProjectModal;
+  window.submitCreateProject = submitCreateProject;
+  window.deleteProjectConfirm = deleteProjectConfirm;
+  window.closeConfirmDeleteProject = closeConfirmDeleteProject;
+  window.openRenameProjectModal = openRenameProjectModal;
+  window.closeRenameProjectModal = closeRenameProjectModal;
+  window.submitRenameProject = submitRenameProject;
+  window.toggleProjectMenu = () => {
+    const menu = document.getElementById('project-menu');
+    if (menu) menu.classList.toggle('open');
+  };
+
+  await loadSettings();
+  applyTheme(state.theme);
+  await loadProjects();  // must happen before loadPages
+  await loadPages();
+  setupEventListeners();
+  handleHashRoute();
+  window.addEventListener('hashchange', handleHashRoute);
+}
+
+// ── Projects ──────────────────────────────────────────────────────────────────
+async function loadProjects(): Promise<void> {
+  try {
+    const { projects } = await api.listProjects();
+    state.projects = projects;
+
+    // Validate stored project still exists
+    const stored = getCurrentProjectId();
+    if (!projects.find(p => p.id === stored)) {
+      setCurrentProjectId('default');
+    }
+
+    renderProjectSwitcher();
+  } catch { /* silently fail — server may not have migrated yet */ }
+}
+
+function renderProjectSwitcher(): void {
+  const switcher = document.getElementById('project-switcher');
+  if (!switcher) return;
+
+  const currentId = getCurrentProjectId();
+  const current = state.projects.find(p => p.id === currentId) ?? state.projects[0];
+  const currentName = current?.name ?? 'Default';
+  const initials = (name: string) => name.slice(0, 2).toUpperCase();
+
+  const hue = (name: string) => {
+    let h = 0;
+    for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
+    return h;
+  };
+
+  const avatarStyle = (name: string, isDefault: boolean) =>
+    isDefault ? '' : `style="background: hsl(${hue(name)}, 60%, 48%)"`;
+
+  switcher.innerHTML = `
+    <button class="project-switcher-btn" onclick="toggleProjectMenu()" title="Switch project">
+      <span class="project-switcher-avatar" ${avatarStyle(currentName, currentId === 'default')}>${initials(currentName)}</span>
+      <span class="project-switcher-name">${currentName}</span>
+      <svg class="project-switcher-arrow" viewBox="0 0 20 20" fill="currentColor" width="12" height="12"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+    </button>
+    <div class="project-menu" id="project-menu">
+      <div class="project-menu-label">Workspaces</div>
+      ${state.projects.map(p => {
+        const isActive = p.id === currentId;
+        // Use <div role="button"> so we can nest real <button> inside for delete
+        return `
+        <div class="project-menu-item${isActive ? ' project-menu-item--active' : ''}"
+             role="button" tabindex="0"
+             onclick="switchProject('${p.id}')"
+             onkeydown="if(event.key==='Enter'||event.key===' ')switchProject('${p.id}')">
+          <span class="project-menu-avatar" ${avatarStyle(p.name, p.id === 'default')}>${initials(p.name)}</span>
+          <span class="project-menu-item-name">${p.name}</span>
+          ${p.id !== 'default'
+            ? `<span class="project-menu-actions">
+                 <button class="project-menu-action-btn"
+                         onclick="event.stopPropagation();openRenameProjectModal('${p.id}','${p.name}')"
+                         title="Rename workspace">
+                   <svg viewBox="0 0 12 12" fill="none" width="11" height="11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                     <path d="M8.5 1.5a1.414 1.414 0 012 2L3.5 10.5l-3 .5.5-3z"/>
+                   </svg>
+                 </button>
+                 <button class="project-menu-action-btn project-menu-action-delete"
+                         onclick="event.stopPropagation();deleteProjectConfirm('${p.id}','${p.name}')"
+                         title="Delete workspace">
+                   <svg viewBox="0 0 10 10" fill="none" width="9" height="9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                     <line x1="1" y1="1" x2="9" y2="9"/><line x1="9" y1="1" x2="1" y2="9"/>
+                   </svg>
+                 </button>
+               </span>`
+            : '<span class="project-menu-spacer"></span>'
+          }
+        </div>`;
+      }).join('')}
+      <div class="project-menu-divider"></div>
+      <div class="project-menu-item project-menu-new"
+           role="button" tabindex="0"
+           onclick="openCreateProjectModal()"
+           onkeydown="if(event.key==='Enter')openCreateProjectModal()">
+        <span class="project-menu-new-icon">+</span>
+        <span>New workspace</span>
+      </div>
+    </div>
+  `;
+}
+
+// Close project menu when clicking outside
+document.addEventListener('click', (e: MouseEvent) => {
+  const menu = document.getElementById('project-menu');
+  const switcher = document.getElementById('project-switcher');
+  if (menu?.classList.contains('open') && !switcher?.contains(e.target as Node)) {
+    menu.classList.remove('open');
+  }
+});
+
+async function switchProject(id: string): Promise<void> {
+  if (id === getCurrentProjectId()) return;
+  setCurrentProjectId(id);
+
+  // Close menu
+  document.getElementById('project-menu')?.classList.remove('open');
+
+  // Clear current page
+  state.currentPageId = null;
+  state.currentPage = null;
+  state.chatMessages = [];
+
+  // Reload UI
+  renderProjectSwitcher();
+  await loadPages();
+  $('main-content').innerHTML = '<div class="empty-state"><p>Select a page to get started.</p></div>';
+  showToast(`Switched to ${state.projects.find(p => p.id === id)?.name ?? id}`);
+}
+
+// Create project modal
+function openCreateProjectModal(): void {
+  document.getElementById('project-menu')?.classList.remove('open');
+  const overlay = document.getElementById('create-project-overlay');
+  if (overlay) overlay.classList.add('open');
+  const input = document.getElementById('new-project-name') as HTMLInputElement;
+  if (input) { input.value = ''; input.focus(); }
+}
+
+function closeCreateProjectModal(): void {
+  document.getElementById('create-project-overlay')?.classList.remove('open');
+}
+
+async function submitCreateProject(): Promise<void> {
+  const input = document.getElementById('new-project-name') as HTMLInputElement;
+  const name = input?.value?.trim();
+  if (!name) return;
+
+  try {
+    const { project } = await api.createProject(name);
+    state.projects.push(project);
+    closeCreateProjectModal();
+    await switchProject(project.id);
+  } catch (err) {
+    showToast('Failed to create project: ' + (err as Error).message, 'error');
+  }
+}
+
+// Delete project confirmation (reuses the existing confirm-delete modal)
+let _deleteProjectId: string | null = null;
+
+async function deleteProjectConfirm(id: string, name: string): Promise<void> {
+  _deleteProjectId = id;
+  const confirmed = await showConfirmDelete(name, 'Delete workspace?');
+  if (!confirmed) { _deleteProjectId = null; return; }
+
+  try {
+    await api.deleteProject(id);
+    state.projects = state.projects.filter(p => p.id !== id);
+    if (getCurrentProjectId() === id) {
+      await switchProject('default');
+    } else {
+      renderProjectSwitcher();
+    }
+    showToast(`"${name}" deleted`);
+  } catch (err) {
+    showToast((err as Error).message, 'error');
+  }
+  _deleteProjectId = null;
+}
+
+// Needed for window assignment — close project confirm just delegates to closeConfirmDelete
+function closeConfirmDeleteProject(result: boolean): void {
+  closeConfirmDelete(result);
+}
+
+
+// ── Rename project ────────────────────────────────────────────────────────────
+let _renameProjectId: string | null = null;
+
+function openRenameProjectModal(id: string, currentName: string): void {
+  _renameProjectId = id;
+  document.getElementById('project-menu')?.classList.remove('open');
+  const overlay = document.getElementById('rename-project-overlay');
+  if (overlay) overlay.classList.add('open');
+  const input = document.getElementById('rename-project-input') as HTMLInputElement;
+  if (input) { input.value = currentName; input.focus(); input.select(); }
+}
+
+function closeRenameProjectModal(): void {
+  document.getElementById('rename-project-overlay')?.classList.remove('open');
+  _renameProjectId = null;
+}
+
+async function submitRenameProject(): Promise<void> {
+  const input = document.getElementById('rename-project-input') as HTMLInputElement;
+  const name = input?.value.trim();
+  if (!name || !_renameProjectId) return;
+  try {
+    const { project } = await api.renameProject(_renameProjectId, name);
+    const idx = state.projects.findIndex(p => p.id === project.id);
+    if (idx !== -1) state.projects[idx] = project;
+    renderProjectSwitcher();
+    closeRenameProjectModal();
+    showToast(`Renamed to "${name}"`);
+  } catch (err) {
+    showToast((err as Error).message, 'error');
+  }
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────────
@@ -233,7 +460,7 @@ function buildNavItem(page: NavPageNode, showNum: boolean, num?: number): HTMLEl
           <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/>
         </svg>
         <span class="nav-name">${esc(displayName)}</span>
-        ${page.child_count ? `<span class="nav-count">${page.child_count}</span>` : ''}
+
       </div>
       ${hasChildren ? `
         <button class="nav-expand-btn${isExpanded ? ' open' : ''}" data-folder-id="${page.id}">
@@ -662,7 +889,7 @@ function renderFolderView(page: PageNode, container: HTMLElement): void {
         </div>
         <div class="folder-num">SECTION ${sectionNum}</div>
         <h1 class="folder-title" style="margin:0">${esc(displayName)}</h1>
-        <p class="folder-meta">${children.length} item${children.length !== 1 ? 's' : ''}</p>
+        <p class="folder-meta">${children.length + (page.assets?.length || 0)} item${(children.length + (page.assets?.length || 0)) !== 1 ? 's' : ''}</p>
       </div>
 
       <div class="section-heading">Contents</div>
@@ -677,7 +904,7 @@ function renderFolderView(page: PageNode, container: HTMLElement): void {
                   ${child.type === 'folder' ? '📁' : ext === 'html' ? '🌐' : '📝'}
                 </div>
                 <div class="child-card-name">${esc(childName)}</div>
-                <div class="child-card-meta">${child.type === 'folder' ? `${child.child_count || 0} items` : ext.toUpperCase() || 'MD'}</div>
+                <div class="child-card-meta">${child.type === 'folder' ? `${(state.pages.filter(p => p.parent_id === child.id).length + ((child as any).asset_count || 0))} items` : ext.toUpperCase() || 'MD'}</div>
               </div>
             `;
           }).join('')}
@@ -801,9 +1028,11 @@ async function uploadFiles(files: FileList, pageId: string): Promise<void> {
 
 let _confirmDeleteResolve: ((v: boolean) => void) | null = null;
 
-function showConfirmDelete(filename?: string): Promise<boolean> {
+function showConfirmDelete(filename?: string, title = 'Delete asset?'): Promise<boolean> {
   return new Promise(resolve => {
     _confirmDeleteResolve = resolve;
+    const titleEl = document.getElementById('confirm-delete-title');
+    if (titleEl) titleEl.textContent = title;
     const msg = $('confirm-delete-msg');
     if (msg) msg.textContent = filename ? `“${filename}” will be permanently deleted.` : 'This action cannot be undone.';
     $('confirm-delete-overlay').classList.add('open');
@@ -1479,11 +1708,15 @@ function setupEventListeners(): void {
   $('new-page-overlay').addEventListener('click', (e: MouseEvent) => { if (e.target === $('new-page-overlay')) closeNewPageModal(); });
   $('settings-overlay').addEventListener('click', (e: MouseEvent) => { if (e.target === $('settings-overlay')) closeSettings(); });
   $('lightbox').addEventListener('click', (e: MouseEvent) => { if (e.target === $('lightbox')) closeLightbox(); });
+  $('create-project-overlay').addEventListener('click', (e: MouseEvent) => { if (e.target === $('create-project-overlay')) closeCreateProjectModal(); });
+  $('rename-project-overlay').addEventListener('click', (e: MouseEvent) => { if (e.target === $('rename-project-overlay')) closeRenameProjectModal(); });
 
   document.addEventListener('keydown', (e: KeyboardEvent) => {
     if (e.key === 'Escape') {
       closeLightbox();
       closeConfirmDelete(false);
+      closeCreateProjectModal();
+      closeRenameProjectModal();
       $('compose-popup').classList.remove('open');
     }
   });

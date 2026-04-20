@@ -1,12 +1,12 @@
 // src/server/ai/index.ts — Unified AI adapter
 // Supports: OpenAI, Google Gemini, Anthropic Claude, OpenAI-Compatible
-import { db } from '../db.js';
+import { globalDb as db } from '../db.js';
 import type { LLMMessage, AIOptions, ImageResult, Settings } from '../../shared/types.js';
 
 function getSettings(): Settings {
   const rows = db.prepare<[], { key: string; value: string }>(`SELECT key, value FROM settings`).all();
   const s: Record<string, string> = {};
-  rows.forEach(r => { s[r.key] = r.value; });
+  rows.forEach((r: { key: string; value: string }) => { s[r.key] = r.value; });
   return s as Settings;
 }
 

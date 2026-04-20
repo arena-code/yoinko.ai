@@ -1,15 +1,16 @@
-// src/server/files.ts — Filesystem-based page manager
-// Pages live in data/pages/ as real .md and .html files
-// Folders on disk = sidebar sections; no SQLite for page content
+// src/server/files.ts — Filesystem-based page manager (multi-project aware)
+// Pages live in data/<project>/pages/ as real .md and .html files
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-export const PAGES_DIR = path.join(__dirname, '..', '..', 'data', 'pages');
-// Ensure pages directory exists, seed if empty
-if (!fs.existsSync(PAGES_DIR)) {
-    fs.mkdirSync(PAGES_DIR, { recursive: true });
-    seedInitialContent();
+import { getProjectDirs } from './projects.js';
+// ── Project pages dir ─────────────────────────────────────────────────────────
+export function getPagesDir(projectId = 'default') {
+    const { pagesDir } = getProjectDirs(projectId);
+    if (!fs.existsSync(pagesDir)) {
+        fs.mkdirSync(pagesDir, { recursive: true });
+        seedInitialContent(pagesDir);
+    }
+    return pagesDir;
 }
 function parseName(rawName) {
     const match = rawName.match(/^(\d+)\s*[-–]\s*(.+)$/);
@@ -40,7 +41,6 @@ function sanitizePath(relPath) {
 }
 // ── Directory scanner ─────────────────────────────────────────────────────────
 export function scanDir(baseDir, relDir) {
-    baseDir = baseDir ?? PAGES_DIR;
     relDir = relDir ?? '';
     const fullDir = relDir ? path.join(baseDir, relDir) : baseDir;
     if (!fs.existsSync(fullDir))
@@ -135,38 +135,38 @@ export function flattenTree(tree, parentId = null) {
     return result;
 }
 // ── File operations ───────────────────────────────────────────────────────────
-export function readPage(relPath) {
+export function readPage(pagesDir, relPath) {
     const safe = sanitizePath(relPath);
-    const fullPath = path.join(PAGES_DIR, safe);
+    const fullPath = path.join(pagesDir, safe);
     if (!fs.existsSync(fullPath))
         throw new Error('File not found: ' + relPath);
     return fs.readFileSync(fullPath, 'utf8');
 }
-export function writePage(relPath, content) {
+export function writePage(pagesDir, relPath, content) {
     const safe = sanitizePath(relPath);
-    const fullPath = path.join(PAGES_DIR, safe);
+    const fullPath = path.join(pagesDir, safe);
     if (!fs.existsSync(fullPath))
         throw new Error('File not found: ' + relPath);
     fs.writeFileSync(fullPath, content, 'utf8');
 }
-export function createPage(relPath, content = '') {
+export function createPage(pagesDir, relPath, content = '') {
     const safe = sanitizePath(relPath);
-    const fullPath = path.join(PAGES_DIR, safe);
+    const fullPath = path.join(pagesDir, safe);
     if (fs.existsSync(fullPath))
         throw new Error('File already exists');
     fs.mkdirSync(path.dirname(fullPath), { recursive: true });
     fs.writeFileSync(fullPath, content, 'utf8');
 }
-export function createFolder(relPath) {
+export function createFolder(pagesDir, relPath) {
     const safe = sanitizePath(relPath);
-    const fullPath = path.join(PAGES_DIR, safe);
+    const fullPath = path.join(pagesDir, safe);
     if (fs.existsSync(fullPath))
         throw new Error('Folder already exists');
     fs.mkdirSync(fullPath, { recursive: true });
 }
-export function deletePath(relPath) {
+export function deletePath(pagesDir, relPath) {
     const safe = sanitizePath(relPath);
-    const fullPath = path.join(PAGES_DIR, safe);
+    const fullPath = path.join(pagesDir, safe);
     if (!fs.existsSync(fullPath))
         throw new Error('Not found');
     const stat = fs.statSync(fullPath);
@@ -177,9 +177,9 @@ export function deletePath(relPath) {
         fs.unlinkSync(fullPath);
     }
 }
-export function renamePath(oldRelPath, newName) {
+export function renamePath(pagesDir, oldRelPath, newName) {
     const safeOld = sanitizePath(oldRelPath);
-    const oldFull = path.join(PAGES_DIR, safeOld);
+    const oldFull = path.join(pagesDir, safeOld);
     if (!fs.existsSync(oldFull))
         throw new Error('Not found');
     const newFull = path.join(path.dirname(oldFull), newName);
@@ -187,37 +187,34 @@ export function renamePath(oldRelPath, newName) {
     return path.join(path.dirname(safeOld), newName).replace(/\\/g, '/');
 }
 // ── Seed initial content ──────────────────────────────────────────────────────
-function seedInitialContent() {
-    const folder1 = path.join(PAGES_DIR, '1 - Getting Started');
+function seedInitialContent(pagesDir) {
+    const folder1 = path.join(pagesDir, '1 - Getting Started');
     fs.mkdirSync(folder1, { recursive: true });
-    fs.writeFileSync(path.join(folder1, '01 - Welcome.md'), `# Welcome to Notas
+    fs.writeFileSync(path.join(folder1, '01 - Welcome.md'), `# Welcome to yoınko
 
-Notas is your open-source, AI-powered knowledge base.
+yoınko is your open-source, AI-powered knowledge base.
 
 ## How it works
 
-Notas is **filesystem-first** — pages are real files on disk:
+yoınko is **filesystem-first** — pages are real files on disk:
 
-- 📁 **Folders** in \`data/pages/\` become sidebar sections
+- 📁 **Folders** become sidebar sections
 - 📝 **.md files** become Markdown pages
 - 🌐 **.html files** become HTML pages
 - 🔢 **Prefix with numbers** to control order: \`01 - Page Name.md\`
 
-You can manage files directly in \`data/pages/\` or through the app UI.
-
 ## Quick Start
 
-1. Click **Edit** in the top right to edit this page
+1. Click the folder name to start adding pages
 2. Use the **+ New Page** / **Folder** buttons to create content
 3. Configure AI in **Settings** ⚙️ (gear icon)
-4. Use the **+** floating button to add AI-generated sections
-5. Open the 💬 chat to ask AI anything about a page
+4. Open the 💬 chat to ask AI anything about a page
 
 ---
 
-> **Tip:** Drop any \`.md\` or \`.html\` file directly into \`data/pages/\` and it will appear in the sidebar automatically.
+> **Tip:** You can have multiple projects — use the project switcher at the top of the sidebar.
 `);
-    const folder2 = path.join(PAGES_DIR, '2 - My Notes');
+    const folder2 = path.join(pagesDir, '2 - My Notes');
     fs.mkdirSync(folder2, { recursive: true });
     fs.writeFileSync(path.join(folder2, '01 - My First Note.md'), `# My First Note
 
@@ -233,7 +230,7 @@ Click **Edit** in the top bar to start writing.
 
 ---
 
-*Created with Notas*
+*Created with yoınko*
 `);
 }
 //# sourceMappingURL=files.js.map

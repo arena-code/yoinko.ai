@@ -1,6 +1,6 @@
 // src/server/routes/settings.ts
 import express, { Request, Response } from 'express';
-import { db } from '../db.js';
+import { globalDb as db } from '../db.js';
 import type { Settings } from '../../shared/types.js';
 
 const router = express.Router();

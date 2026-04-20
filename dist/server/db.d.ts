@@ -1,5 +1,7 @@
 import Database from 'better-sqlite3';
-export declare const DATA_DIR: string;
-export declare const UPLOADS_DIR: string;
-export declare const db: Database.Database;
+import { DATA_DIR } from './projects.js';
+export declare const globalDb: Database.Database;
+export declare function getProjectDb(projectId?: string): Database.Database;
+export { DATA_DIR };
+export declare function evictProjectDb(projectId: string): void;
 //# sourceMappingURL=db.d.ts.map

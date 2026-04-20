@@ -1,6 +1,6 @@
 // src/server/routes/settings.ts
 import express from 'express';
-import { db } from '../db.js';
+import { globalDb as db } from '../db.js';
 const router = express.Router();
 // ── GET /api/settings ─────────────────────────────────────────────────────────
 router.get('/', (_req, res) => {

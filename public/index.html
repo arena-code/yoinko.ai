@@ -32,6 +32,8 @@
       <div class="logo-mark">
         <img src="/yoinko-logo.svg" alt="yoınko" class="yk-logo-img">
       </div>
+      <!-- Project switcher -->
+      <div class="project-switcher" id="project-switcher"></div>
     </div>
 
     <div class="sidebar-search">
@@ -250,11 +252,52 @@
   </div>
 </div>
 
+<!-- Create Project Modal -->
+<div class="modal-overlay" id="create-project-overlay">
+  <div class="modal" style="width:360px">
+    <div class="modal-title">
+      ◈ New Project
+      <button class="modal-close" onclick="closeCreateProjectModal()">
+        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <label class="form-label">Project name</label>
+      <input type="text" id="new-project-name" class="form-input" placeholder="e.g. Work, Personal…"
+             onkeydown="if(event.key==='Enter')submitCreateProject();if(event.key==='Escape')closeCreateProjectModal();">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeCreateProjectModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitCreateProject()">Create</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="rename-project-overlay">
+  <div class="modal" style="width:360px">
+    <div class="modal-title">
+      Rename workspace
+      <button class="modal-close" onclick="closeRenameProjectModal()">
+        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <label class="form-label">Workspace name</label>
+      <input type="text" id="rename-project-input" class="form-input" placeholder="Enter new name…"
+             onkeydown="if(event.key==='Enter')submitRenameProject();if(event.key==='Escape')closeRenameProjectModal();">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeRenameProjectModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitRenameProject()">Rename</button>
+    </div>
+  </div>
+</div>
+
 <!-- Confirm Delete Modal -->
 <div class="modal-overlay" id="confirm-delete-overlay">
   <div class="modal" style="width:380px;text-align:center;">
     <div style="font-size:32px;margin-bottom:12px;">🗑️</div>
-    <div class="modal-title" style="justify-content:center;border:none;padding-bottom:0;">Delete asset?</div>
+    <div class="modal-title" id="confirm-delete-title" style="justify-content:center;border:none;padding-bottom:0;">Delete asset?</div>
     <p id="confirm-delete-msg" style="color:var(--text-muted);font-size:14px;margin:10px 0 24px;">This action cannot be undone.</p>
     <div class="modal-actions" style="justify-content:center;gap:12px;">
       <button class="btn btn-ghost" id="confirm-delete-cancel">Cancel</button>

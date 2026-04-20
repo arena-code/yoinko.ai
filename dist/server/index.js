@@ -7,9 +7,13 @@ import pagesRouter from './routes/pages.js';
 import assetsRouter from './routes/assets.js';
 import aiRouter from './routes/ai.js';
 import settingsRouter from './routes/settings.js';
+import projectsRouter from './routes/projects.js';
+import { migrateOnStartup } from './projects.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
+// ── Run startup migration (flat → project layout) ─────────────────────────────
+migrateOnStartup();
 // ── Middleware ────────────────────────────────────────────────────────────────
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
@@ -27,9 +31,10 @@ app.use('/api/pages', pagesRouter);
 app.use('/api/assets', assetsRouter);
 app.use('/api/ai', aiRouter);
 app.use('/api/settings', settingsRouter);
+app.use('/api/projects', projectsRouter);
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get('/api/health', (_req, res) => {
-    res.json({ status: 'ok', version: '1.0.0', app: 'notas' });
+    res.json({ status: 'ok', version: '1.0.0', app: 'yoinko' });
 });
 // ── SPA fallback ──────────────────────────────────────────────────────────────
 app.get('*', (_req, res) => {

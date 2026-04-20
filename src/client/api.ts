@@ -1,19 +1,30 @@
-// src/client/api.ts — Typed API client
+// src/client/api.ts — Typed API client (multi-project aware)
 import type {
-  PageNode, Asset, Settings, LLMMessage, ChatMessage,
+  PageNode, Asset, Settings, LLMMessage, ChatMessage, Project,
   PagesResponse, PageResponse, AssetsResponse, AssetResponse,
-  SettingsResponse, SuccessResponse,
+  SettingsResponse, SuccessResponse, ProjectsResponse,
 } from '../shared/types.js';
 
 const API_BASE = '/api';
 
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
 
+// Current project — set via api.setProject(), persisted in localStorage
+let _currentProjectId: string = localStorage.getItem('yoinko_project') ?? 'default';
+
+export function getCurrentProjectId(): string { return _currentProjectId; }
+
+export function setCurrentProjectId(id: string): void {
+  _currentProjectId = id;
+  localStorage.setItem('yoinko_project', id);
+}
+
 async function request<T>(method: HttpMethod, path: string, body?: unknown, isFormData = false): Promise<T> {
-  const opts: RequestInit = {
-    method,
-    headers: isFormData ? {} : { 'Content-Type': 'application/json' },
-  };
+  const headers: Record<string, string> = isFormData
+    ? { 'X-Project-Id': _currentProjectId }
+    : { 'Content-Type': 'application/json', 'X-Project-Id': _currentProjectId };
+
+  const opts: RequestInit = { method, headers };
   if (body !== undefined) {
     opts.body = isFormData ? (body as FormData) : JSON.stringify(body);
   }
@@ -56,6 +67,12 @@ export interface UpdatePageParams {
 }
 
 export const api = {
+  // ── Projects ───────────────────────────────────────────────────────────────
+  listProjects: () => request<ProjectsResponse>('GET', '/projects'),
+  createProject: (name: string) => request<{ project: Project }>('POST', '/projects', { name }),
+  renameProject: (id: string, name: string) => request<{ project: Project }>('PATCH', `/projects/${id}`, { name }),
+  deleteProject: (id: string) => request<SuccessResponse>('DELETE', `/projects/${id}`),
+
   // ── Pages ──────────────────────────────────────────────────────────────────
   getTree: () => request<PagesResponse>('GET', '/pages'),
   getFlat: () => request<PagesResponse>('GET', '/pages/flat'),
@@ -89,7 +106,10 @@ export const api = {
     try {
       const res = await fetch(`${API_BASE}/ai/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Project-Id': _currentProjectId,
+        },
         body: JSON.stringify({ messages, page_id: pageId, page_content: pageContent }),
       });
       if (!res.ok) {

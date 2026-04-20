@@ -1,5 +1,11 @@
 // src/shared/types.ts — Domain interfaces shared between server & client
 
+export interface Project {
+  id: string;        // slug e.g. "default", "my-work"
+  name: string;      // display name e.g. "Default", "My Work"
+  created_at: string;
+}
+
 export interface PageNode {
   id: string;
   path: string;
@@ -68,6 +74,7 @@ export interface ImageResult {
 }
 
 // API response shapes
+export interface ProjectsResponse { projects: Project[] }
 export interface PagesResponse { pages: PageNode[] }
 export interface PageResponse { page: PageNode }
 export interface AssetsResponse { assets: Asset[] }

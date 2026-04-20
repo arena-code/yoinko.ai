@@ -3,10 +3,14 @@ import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import fs from 'fs';
-import { db, UPLOADS_DIR } from '../db.js';
+import { getProjectDb } from '../db.js';
+import { getProjectDirs } from '../projects.js';
 import { generateText, streamText, generateImage } from '../ai/index.js';
 const router = express.Router();
 const now = () => new Date().toISOString();
+function projectId(req) {
+    return req.headers['x-project-id'] || 'default';
+}
 // ── POST /api/ai/generate — one-shot content generation ──────────────────────
 router.post('/generate', async (req, res) => {
     try {
@@ -41,10 +45,12 @@ router.post('/chat', async (req, res) => {
     res.setHeader('Connection', 'keep-alive');
     res.flushHeaders();
     const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+    const pid = projectId(req);
+    const db = getProjectDb(pid);
     try {
         const systemMsg = {
             role: 'system',
-            content: `You are a helpful AI assistant embedded in Notas, a knowledge base app. Be concise and helpful.${page_content ? `\n\nCurrent page content for context:\n${page_content.slice(0, 3000)}` : ''}`,
+            content: `You are a helpful AI assistant embedded in yoınko, a knowledge base app. Be concise and helpful.${page_content ? `\n\nCurrent page content for context:\n${page_content.slice(0, 3000)}` : ''}`,
         };
         const fullMessages = [systemMsg, ...messages];
         let fullReply = '';
@@ -77,13 +83,17 @@ router.post('/image', async (req, res) => {
         const { prompt, page_id } = req.body;
         if (!prompt)
             return void res.status(400).json({ error: 'prompt is required' });
+        const pid = projectId(req);
+        const db = getProjectDb(pid);
+        const { uploadsDir } = getProjectDirs(pid);
+        fs.mkdirSync(uploadsDir, { recursive: true });
         const result = await generateImage(prompt);
         // If we get a URL (OpenAI), download and save it
         if (result.url) {
             const resp = await fetch(result.url);
             const buffer = Buffer.from(await resp.arrayBuffer());
             const filename = `${uuidv4()}.png`;
-            const filePath = path.join(UPLOADS_DIR, filename);
+            const filePath = path.join(uploadsDir, filename);
             fs.writeFileSync(filePath, buffer);
             const id = uuidv4();
             const ts = now();
@@ -95,7 +105,7 @@ router.post('/image', async (req, res) => {
         if (result.base64) {
             const buffer = Buffer.from(result.base64, 'base64');
             const filename = `${uuidv4()}.png`;
-            const filePath = path.join(UPLOADS_DIR, filename);
+            const filePath = path.join(uploadsDir, filename);
             fs.writeFileSync(filePath, buffer);
             const id = uuidv4();
             const ts = now();
@@ -116,6 +126,7 @@ router.get('/chat/history', (req, res) => {
         const { page_id } = req.query;
         if (!page_id)
             return void res.json({ messages: [] });
+        const db = getProjectDb(projectId(req));
         const messages = db.prepare(`SELECT * FROM chat_messages WHERE page_id = ? ORDER BY created_at ASC`).all(page_id);
         res.json({ messages });
     }
