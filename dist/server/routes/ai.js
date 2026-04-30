@@ -11,6 +11,10 @@ const now = () => new Date().toISOString();
 function projectId(req) {
     return req.headers['x-project-id'] || 'default';
 }
+/** Get tenant data dir from request (set by cloud-auth middleware) */
+function dataDir(req) {
+    return req.tenantDataDir;
+}
 // ── POST /api/ai/generate — one-shot content generation ──────────────────────
 router.post('/generate', async (req, res) => {
     try {
@@ -46,7 +50,7 @@ router.post('/chat', async (req, res) => {
     res.flushHeaders();
     const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
     const pid = projectId(req);
-    const db = getProjectDb(pid);
+    const db = getProjectDb(pid, dataDir(req));
     try {
         const systemMsg = {
             role: 'system',
@@ -84,8 +88,9 @@ router.post('/image', async (req, res) => {
         if (!prompt)
             return void res.status(400).json({ error: 'prompt is required' });
         const pid = projectId(req);
-        const db = getProjectDb(pid);
-        const { uploadsDir } = getProjectDirs(pid);
+        const dd = dataDir(req);
+        const db = getProjectDb(pid, dd);
+        const { uploadsDir } = getProjectDirs(pid, dd);
         fs.mkdirSync(uploadsDir, { recursive: true });
         const result = await generateImage(prompt);
         // If we get a URL (OpenAI), download and save it
@@ -126,7 +131,7 @@ router.get('/chat/history', (req, res) => {
         const { page_id } = req.query;
         if (!page_id)
             return void res.json({ messages: [] });
-        const db = getProjectDb(projectId(req));
+        const db = getProjectDb(projectId(req), dataDir(req));
         const messages = db.prepare(`SELECT * FROM chat_messages WHERE page_id = ? ORDER BY created_at ASC`).all(page_id);
         res.json({ messages });
     }

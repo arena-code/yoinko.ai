@@ -4,8 +4,8 @@ import fs from 'fs';
 import path from 'path';
 import { getProjectDirs } from './projects.js';
 // ── Project pages dir ─────────────────────────────────────────────────────────
-export function getPagesDir(projectId = 'default') {
-    const { pagesDir } = getProjectDirs(projectId);
+export function getPagesDir(projectId = 'default', dataDir) {
+    const { pagesDir } = getProjectDirs(projectId, dataDir);
     if (!fs.existsSync(pagesDir)) {
         fs.mkdirSync(pagesDir, { recursive: true });
         seedInitialContent(pagesDir);

@@ -1,28 +1,60 @@
-// src/server/db.ts — SQLite initialization (multi-project aware)
+// src/server/db.ts — SQLite initialization (multi-project + multi-tenant aware)
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import { DATA_DIR, getProjectDirs } from './projects.js';
+import { CLOUD_ENABLED } from './tenant-context.js';
 // ── Global DB (settings only — shared across all projects) ────────────────────
-const GLOBAL_DB_PATH = path.join(DATA_DIR, 'global.db');
-fs.mkdirSync(DATA_DIR, { recursive: true });
-export const globalDb = new Database(GLOBAL_DB_PATH);
-globalDb.pragma('journal_mode = WAL');
-globalDb.pragma('foreign_keys = ON');
-globalDb.exec(`
-  CREATE TABLE IF NOT EXISTS settings (
-    key   TEXT PRIMARY KEY,
-    value TEXT
-  );
-`);
-// Seed defaults
-const insertSetting = globalDb.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`);
-insertSetting.run('theme', 'dark');
-insertSetting.run('llm_provider', 'openai');
-insertSetting.run('llm_model', 'gpt-4o-mini');
-insertSetting.run('llm_api_key', '');
-insertSetting.run('llm_base_url', '');
-insertSetting.run('image_model', 'dall-e-3');
+// In cloud mode, each tenant has their own global.db in their data dir.
+// In self-hosted mode, there's a single global.db.
+function createGlobalDb(dbDir) {
+    fs.mkdirSync(dbDir, { recursive: true });
+    const dbPath = path.join(dbDir, 'global.db');
+    const db = new Database(dbPath);
+    db.pragma('journal_mode = WAL');
+    db.pragma('foreign_keys = ON');
+    db.exec(`
+    CREATE TABLE IF NOT EXISTS settings (
+      key   TEXT PRIMARY KEY,
+      value TEXT
+    );
+  `);
+    // Seed defaults
+    const insertSetting = db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`);
+    insertSetting.run('theme', 'dark');
+    insertSetting.run('llm_provider', 'openai');
+    insertSetting.run('llm_model', 'gpt-4o-mini');
+    insertSetting.run('llm_api_key', '');
+    insertSetting.run('llm_base_url', '');
+    insertSetting.run('image_model', 'dall-e-3');
+    return db;
+}
+// Self-hosted: initialize at boot
+let _selfHostedGlobalDb = null;
+function getSelfHostedGlobalDb() {
+    if (!_selfHostedGlobalDb) {
+        _selfHostedGlobalDb = createGlobalDb(DATA_DIR);
+    }
+    return _selfHostedGlobalDb;
+}
+// Cloud: per-tenant global db cache
+const globalDbCache = new Map();
+/**
+ * Get the global settings DB.
+ * In self-hosted mode: returns the singleton global.db
+ * In cloud mode: returns the tenant's global.db (from req.tenantDataDir)
+ */
+export function getGlobalDb(dataDir) {
+    if (!CLOUD_ENABLED || !dataDir) {
+        return getSelfHostedGlobalDb();
+    }
+    if (!globalDbCache.has(dataDir)) {
+        globalDbCache.set(dataDir, createGlobalDb(dataDir));
+    }
+    return globalDbCache.get(dataDir);
+}
+// Legacy export for backward compatibility
+export const globalDb = getSelfHostedGlobalDb();
 // ── Per-project DB cache ──────────────────────────────────────────────────────
 const projectDbCache = new Map();
 function createProjectDb(dbPath) {
@@ -50,26 +82,30 @@ function createProjectDb(dbPath) {
   `);
     return db;
 }
-export function getProjectDb(projectId = 'default') {
-    if (projectDbCache.has(projectId)) {
-        return projectDbCache.get(projectId);
+export function getProjectDb(projectId = 'default', dataDir) {
+    const effectiveDataDir = dataDir || DATA_DIR;
+    const cacheKey = `${effectiveDataDir}:${projectId}`;
+    if (projectDbCache.has(cacheKey)) {
+        return projectDbCache.get(cacheKey);
     }
-    const { dbPath, uploadsDir } = getProjectDirs(projectId);
+    const { dbPath, uploadsDir } = getProjectDirs(projectId, effectiveDataDir);
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
     fs.mkdirSync(uploadsDir, { recursive: true });
     const db = createProjectDb(dbPath);
-    projectDbCache.set(projectId, db);
+    projectDbCache.set(cacheKey, db);
     return db;
 }
 // Backwards compat: used by routes before they were project-aware
 // (settings route still uses globalDb directly)
 export { DATA_DIR };
 // Helper to invalidate cache if a project is deleted
-export function evictProjectDb(projectId) {
-    const db = projectDbCache.get(projectId);
+export function evictProjectDb(projectId, dataDir) {
+    const effectiveDataDir = dataDir || DATA_DIR;
+    const cacheKey = `${effectiveDataDir}:${projectId}`;
+    const db = projectDbCache.get(cacheKey);
     if (db) {
         db.close();
-        projectDbCache.delete(projectId);
+        projectDbCache.delete(cacheKey);
     }
 }
 //# sourceMappingURL=db.js.map

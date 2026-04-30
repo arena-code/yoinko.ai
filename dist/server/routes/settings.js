@@ -1,10 +1,15 @@
 // src/server/routes/settings.ts
 import express from 'express';
-import { globalDb as db } from '../db.js';
+import { getGlobalDb } from '../db.js';
 const router = express.Router();
+/** Get tenant data dir from request (set by cloud-auth middleware) */
+function dataDir(req) {
+    return req.tenantDataDir;
+}
 // ── GET /api/settings ─────────────────────────────────────────────────────────
-router.get('/', (_req, res) => {
+router.get('/', (req, res) => {
     try {
+        const db = getGlobalDb(dataDir(req));
         const rows = db.prepare(`SELECT key, value FROM settings`).all();
         const settings = {};
         rows.forEach(r => { settings[r.key] = r.value; });
@@ -21,6 +26,7 @@ router.get('/', (_req, res) => {
 // ── PUT /api/settings — update one or more settings ──────────────────────────
 router.put('/', (req, res) => {
     try {
+        const db = getGlobalDb(dataDir(req));
         const upsert = db.prepare(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`);
         const updateMany = db.transaction((updates) => {
             for (const [key, value] of Object.entries(updates)) {
@@ -37,6 +43,7 @@ router.put('/', (req, res) => {
 // ── GET /api/settings/:key ────────────────────────────────────────────────────
 router.get('/:key', (req, res) => {
     try {
+        const db = getGlobalDb(dataDir(req));
         const row = db.prepare(`SELECT value FROM settings WHERE key = ?`).get(req.params.key);
         if (!row)
             return void res.status(404).json({ error: 'Setting not found' });

@@ -9,6 +9,7 @@ import aiRouter from './routes/ai.js';
 import settingsRouter from './routes/settings.js';
 import projectsRouter from './routes/projects.js';
 import { migrateOnStartup } from './projects.js';
+import { cloudAuth } from './middleware/cloud-auth.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
@@ -26,6 +27,8 @@ const publicDir = isCompiled
     ? path.join(__dirname, '..', 'public')
     : path.join(__dirname, '..', '..', 'public');
 app.use(express.static(publicDir));
+// ── Cloud auth (no-op when YOINKO_CLOUD is not set) ───────────────────────────
+app.use(cloudAuth);
 // ── API Routes ────────────────────────────────────────────────────────────────
 app.use('/api/pages', pagesRouter);
 app.use('/api/assets', assetsRouter);

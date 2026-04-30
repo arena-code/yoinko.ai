@@ -8,10 +8,14 @@ const router = express.Router();
 function projectId(req) {
     return req.headers['x-project-id'] || 'default';
 }
+/** Get tenant data dir from request (set by cloud-auth middleware) */
+function dataDir(req) {
+    return req.tenantDataDir;
+}
 // ── GET /api/pages — full tree ────────────────────────────────────────────────
 router.get('/', (req, res) => {
     try {
-        const pagesDir = getPagesDir(projectId(req));
+        const pagesDir = getPagesDir(projectId(req), dataDir(req));
         const tree = scanDir(pagesDir);
         res.json({ pages: tree });
     }
@@ -22,7 +26,7 @@ router.get('/', (req, res) => {
 // ── GET /api/pages/flat — flat list ──────────────────────────────────────────
 router.get('/flat', (req, res) => {
     try {
-        const pagesDir = getPagesDir(projectId(req));
+        const pagesDir = getPagesDir(projectId(req), dataDir(req));
         const tree = scanDir(pagesDir);
         const flat = flattenTree(tree);
         res.json({ pages: flat });
@@ -35,8 +39,9 @@ router.get('/flat', (req, res) => {
 router.get('/:id', (req, res) => {
     try {
         const pid = projectId(req);
-        const pagesDir = getPagesDir(pid);
-        const db = getProjectDb(pid);
+        const dd = dataDir(req);
+        const pagesDir = getPagesDir(pid, dd);
+        const db = getProjectDb(pid, dd);
         const relPath = fromId(req.params.id);
         const tree = scanDir(pagesDir);
         const flat = flattenTree(tree);
@@ -52,7 +57,10 @@ router.get('/:id', (req, res) => {
             }
         }
         if (page.type === 'folder') {
-            page.children = flat.filter(p => p.parent_id === page.id);
+            page.children = flat.filter(p => p.parent_id === page.id).map(child => {
+                const assetCount = (db.prepare(`SELECT COUNT(*) as cnt FROM assets WHERE page_id = ?`).get(child.id))?.cnt ?? 0;
+                return { ...child, asset_count: assetCount };
+            });
         }
         const assets = db.prepare(`SELECT * FROM assets WHERE page_id = ? ORDER BY created_at DESC`).all(page.id);
         page.assets = assets.map(a => ({ ...a, url: `/api/assets/${a.id}/file` }));
@@ -66,7 +74,7 @@ router.get('/:id', (req, res) => {
 router.post('/', (req, res) => {
     try {
         const pid = projectId(req);
-        const pagesDir = getPagesDir(pid);
+        const pagesDir = getPagesDir(pid, dataDir(req));
         const { name, type, file_type, parent_id, content } = req.body;
         if (!name || !type)
             return void res.status(400).json({ error: 'name and type required' });
@@ -101,7 +109,7 @@ router.post('/', (req, res) => {
 router.put('/:id', (req, res) => {
     try {
         const pid = projectId(req);
-        const pagesDir = getPagesDir(pid);
+        const pagesDir = getPagesDir(pid, dataDir(req));
         const relPath = fromId(req.params.id);
         const { content, name } = req.body;
         if (name !== undefined) {
@@ -128,7 +136,7 @@ router.put('/:id', (req, res) => {
 router.delete('/:id', (req, res) => {
     try {
         const pid = projectId(req);
-        const pagesDir = getPagesDir(pid);
+        const pagesDir = getPagesDir(pid, dataDir(req));
         const relPath = fromId(req.params.id);
         deletePath(pagesDir, relPath);
         res.json({ success: true });

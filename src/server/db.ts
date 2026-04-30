@@ -61,7 +61,7 @@ export function getGlobalDb(dataDir?: string): Database.Database {
 }
 
 // Legacy export for backward compatibility
-export const globalDb = getSelfHostedGlobalDb();
+export const globalDb: Database.Database = getSelfHostedGlobalDb();
 
 // ── Per-project DB cache ──────────────────────────────────────────────────────
 const projectDbCache = new Map<string, Database.Database>();

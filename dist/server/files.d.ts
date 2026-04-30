@@ -1,5 +1,5 @@
 import type { PageNode } from '../shared/types.js';
-export declare function getPagesDir(projectId?: string): string;
+export declare function getPagesDir(projectId?: string, dataDir?: string): string;
 export declare function toId(relPath: string): string;
 export declare function fromId(id: string): string;
 export declare function scanDir(baseDir: string, relDir?: string): PageNode[];
