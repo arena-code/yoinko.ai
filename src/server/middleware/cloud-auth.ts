@@ -38,7 +38,7 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
 // JWKS for verifying Supabase ES256 JWTs (auto-caches keys)
 const JWKS = SUPABASE_URL
-  ? createRemoteJWKSet(new URL(`${SUPABASE_URL}/.well-known/jwks.json`))
+  ? createRemoteJWKSet(new URL(`${SUPABASE_URL}/auth/v1/.well-known/jwks.json`))
   : null;
 
 // ── Tenant cache (avoids Supabase REST call on every request) ─────────────────
