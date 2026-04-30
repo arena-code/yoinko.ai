@@ -35,6 +35,29 @@ const publicDir = isCompiled
 
 app.use(express.static(publicDir));
 
+// ── Cloud token relay (sets auth cookie from query param) ─────────────────────
+// Usage: notes.yoinko.ai/auth/login?token=<JWT>&redirect=/
+// This lets the yoinko.ai website hand off auth to the notes subdomain.
+app.get('/auth/login', (req, res) => {
+  const token = req.query.token as string;
+  const redirect = (req.query.redirect as string) || '/';
+
+  if (!token) {
+    return void res.status(400).send('Missing token');
+  }
+
+  // Set the auth cookie on this domain
+  res.cookie('yoinko_token', token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    path: '/',
+  });
+
+  res.redirect(redirect);
+});
+
 // ── Cloud auth (no-op when YOINKO_CLOUD is not set) ───────────────────────────
 app.use(cloudAuth);
 
