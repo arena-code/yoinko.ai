@@ -45,16 +45,75 @@ const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const PUBLIC_PATHS = ['/api/health'];
 
 function extractToken(req: Request): string | null {
-  // 1. Cookie
   const cookieHeader = req.headers.cookie || '';
-  const match = cookieHeader.match(/yoinko_token=([^;]+)/);
-  if (match) return match[1];
 
-  // 2. Authorization header
+  // 1. Legacy yoinko_token cookie (from token relay)
+  const yoinkoMatch = cookieHeader.match(/yoinko_token=([^;]+)/);
+  if (yoinkoMatch) return yoinkoMatch[1];
+
+  // 2. Supabase SSR cookie (shared via domain=.yoinko.ai)
+  //    Format: sb-<ref>-auth-token or chunked sb-<ref>-auth-token.0, .1, etc.
+  const supabaseToken = extractSupabaseCookie(cookieHeader);
+  if (supabaseToken) return supabaseToken;
+
+  // 3. Authorization header
   const authHeader = req.headers.authorization;
   if (authHeader?.startsWith('Bearer ')) return authHeader.slice(7);
 
   return null;
+}
+
+function extractSupabaseCookie(cookieHeader: string): string | null {
+  try {
+    // Parse all cookies
+    const cookies: Record<string, string> = {};
+    cookieHeader.split(';').forEach(c => {
+      const [name, ...rest] = c.trim().split('=');
+      if (name) cookies[name] = rest.join('=');
+    });
+
+    // Find the Supabase auth cookie (sb-<ref>-auth-token)
+    const authCookieName = Object.keys(cookies).find(
+      name => name.match(/^sb-[^-]+-auth-token$/)
+    );
+
+    let raw = '';
+    if (authCookieName && cookies[authCookieName]) {
+      // Single cookie (not chunked)
+      raw = decodeURIComponent(cookies[authCookieName]);
+    } else {
+      // Chunked cookies: sb-<ref>-auth-token.0, sb-<ref>-auth-token.1, ...
+      const chunkPrefix = Object.keys(cookies).find(
+        name => name.match(/^sb-[^-]+-auth-token\.0$/)
+      );
+      if (!chunkPrefix) return null;
+
+      const prefix = chunkPrefix.replace(/\.0$/, '');
+      const chunks: string[] = [];
+      for (let i = 0; ; i++) {
+        const chunk = cookies[`${prefix}.${i}`];
+        if (!chunk) break;
+        chunks.push(decodeURIComponent(chunk));
+      }
+      raw = chunks.join('');
+    }
+
+    if (!raw) return null;
+
+    // Parse the JSON — Supabase stores { access_token, refresh_token, ... }
+    // The value might be base64-encoded or plain JSON
+    let parsed: any;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      // Try base64 decode
+      parsed = JSON.parse(Buffer.from(raw, 'base64').toString());
+    }
+
+    return parsed?.access_token || null;
+  } catch {
+    return null;
+  }
 }
 
 async function lookupTenant(userId: string): Promise<TenantInfo | null> {
