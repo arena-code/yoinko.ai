@@ -33,7 +33,7 @@ const publicDir = isCompiled
   ? path.join(__dirname, '..', '..', 'public')
   : path.join(__dirname, '..', '..', 'public');
 
-app.use(express.static(publicDir));
+app.use(express.static(publicDir, { index: false }));
 
 // ── Cloud token relay (sets auth cookie from query param) ─────────────────────
 // Usage: notes.yoinko.ai/auth/login?token=<JWT>&redirect=/
