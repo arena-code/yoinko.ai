@@ -340,27 +340,63 @@ function callbackPage(): string {
     import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 
     const supabase = createClient('${SUPABASE_URL}', '${SUPABASE_ANON_KEY}');
+    const statusEl = document.getElementById('status');
+    let handled = false;
 
-    try {
-      const { data: { session }, error } = await supabase.auth.getSession();
-      if (error) throw error;
-      if (!session?.access_token) throw new Error('No session received');
+    // Handle PKCE code exchange (query param ?code=...)
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
 
-      document.getElementById('status').textContent = 'signing you in…';
+    if (code) {
+      statusEl.textContent = 'exchanging code…';
+      try {
+        const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+        if (error) throw error;
+        if (data.session?.access_token) {
+          handled = true;
+          await storeAndRedirect(data.session.access_token);
+        }
+      } catch (err) {
+        showError(err.message || 'Code exchange failed');
+      }
+    }
 
+    // Handle implicit flow (hash fragment #access_token=...)
+    // onAuthStateChange fires when the client auto-detects hash tokens
+    if (!handled) {
+      const timeout = setTimeout(() => {
+        if (!handled) showError('Authentication timed out. Please try again.');
+      }, 10000);
+
+      supabase.auth.onAuthStateChange(async (event, session) => {
+        if (handled) return;
+        if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session?.access_token) {
+          handled = true;
+          clearTimeout(timeout);
+          await storeAndRedirect(session.access_token);
+        }
+      });
+    }
+
+    async function storeAndRedirect(token) {
+      statusEl.textContent = 'signing you in…';
       const res = await fetch('/auth/set-token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ access_token: session.access_token }),
+        body: JSON.stringify({ access_token: token }),
       });
-      if (!res.ok) throw new Error('Failed to store session');
-
+      if (!res.ok) {
+        showError('Failed to store session');
+        return;
+      }
       window.location.href = '/';
-    } catch (err) {
+    }
+
+    function showError(msg) {
       document.querySelector('.spinner').style.display = 'none';
-      document.getElementById('status').style.display = 'none';
+      statusEl.style.display = 'none';
       document.getElementById('error').className = 'cb-error visible';
-      document.getElementById('error-msg').textContent = err.message || 'Authentication failed';
+      document.getElementById('error-msg').textContent = msg;
     }
   </script>
 </body>
