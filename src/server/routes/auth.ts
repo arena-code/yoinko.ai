@@ -38,10 +38,53 @@ router.post('/set-token', (req, res) => {
   res.json({ ok: true });
 });
 
-// ── POST /auth/logout — Clear auth cookie ────────────────────────────────────
-router.post('/logout', (_req, res) => {
-  res.clearCookie('yoinko_token');
+// ── POST /auth/logout — Clear ALL auth cookies ──────────────────────────────
+router.post('/logout', (req, res) => {
+  const isProduction = process.env.NODE_ENV === 'production';
+
+  // Clear yoinko_token — must match exact options from set-token
+  res.clearCookie('yoinko_token', {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: 'lax',
+    path: '/',
+  });
+
+  // Clear any Supabase SSR cookies (sb-<ref>-auth-token and chunked variants)
+  const cookieHeader = req.headers.cookie || '';
+  const cookieNames = cookieHeader.split(';').map(c => c.trim().split('=')[0]).filter(Boolean);
+  for (const name of cookieNames) {
+    if (name.match(/^sb-[^-]+-auth-token/)) {
+      res.clearCookie(name, { path: '/' });
+      // Also try with domain variants
+      res.clearCookie(name, { path: '/', domain: '.yoinko.ai' });
+    }
+  }
+
   res.json({ ok: true });
+});
+
+// ── GET /auth/logout — Clear cookies and redirect to login ───────────────────
+router.get('/logout', (req, res) => {
+  const isProduction = process.env.NODE_ENV === 'production';
+
+  res.clearCookie('yoinko_token', {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: 'lax',
+    path: '/',
+  });
+
+  const cookieHeader = req.headers.cookie || '';
+  const cookieNames = cookieHeader.split(';').map(c => c.trim().split('=')[0]).filter(Boolean);
+  for (const name of cookieNames) {
+    if (name.match(/^sb-[^-]+-auth-token/)) {
+      res.clearCookie(name, { path: '/' });
+      res.clearCookie(name, { path: '/', domain: '.yoinko.ai' });
+    }
+  }
+
+  res.redirect('/auth/login');
 });
 
 // ── Login page HTML ──────────────────────────────────────────────────────────

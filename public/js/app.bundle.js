@@ -150,29 +150,33 @@ var NotasApp = (() => {
       const menu = document.getElementById("project-menu");
       if (menu) menu.classList.toggle("open");
     };
-    window.cloudLogout = async () => {
+    window.cloudLogout = () => {
       try {
-        await fetch("/auth/logout", { method: "POST" });
+        localStorage.clear();
       } catch {
       }
-      window.location.href = "/auth/login";
+      try {
+        sessionStorage.clear();
+      } catch {
+      }
+      window.location.replace("/auth/logout");
     };
     await loadSettings();
     applyTheme(state.theme);
     await loadProjects();
     await loadPages();
     setupEventListeners();
-    handleHashRoute();
-    window.addEventListener("hashchange", handleHashRoute);
     try {
       const healthRes = await fetch("/api/health");
       const health = await healthRes.json();
       if (health.cloud) {
-        const logoutBtn = document.getElementById("btn-logout");
-        if (logoutBtn) logoutBtn.style.display = "";
+        const logoutRow = document.getElementById("sidebar-logout-row");
+        if (logoutRow) logoutRow.style.display = "";
       }
     } catch {
     }
+    handleHashRoute();
+    window.addEventListener("hashchange", handleHashRoute);
   }
   async function loadProjects() {
     try {

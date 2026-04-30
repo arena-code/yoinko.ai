@@ -162,11 +162,12 @@ async function init(): Promise<void> {
     if (menu) menu.classList.toggle('open');
   };
 
-  window.cloudLogout = async () => {
-    try {
-      await fetch('/auth/logout', { method: 'POST' });
-    } catch { /* ignore */ }
-    window.location.href = '/auth/login';
+  window.cloudLogout = () => {
+    // Clear client-side storage (Supabase stores session in localStorage)
+    try { localStorage.clear(); } catch { /* ignore */ }
+    try { sessionStorage.clear(); } catch { /* ignore */ }
+    // Navigate to server-side logout which clears cookies and redirects
+    window.location.replace('/auth/logout');
   };
 
   await loadSettings();
@@ -174,18 +175,19 @@ async function init(): Promise<void> {
   await loadProjects();  // must happen before loadPages
   await loadPages();
   setupEventListeners();
-  handleHashRoute();
-  window.addEventListener('hashchange', handleHashRoute);
 
-  // Cloud mode — show logout button
+  // Cloud mode — show logout button (before handleHashRoute which can throw)
   try {
     const healthRes = await fetch('/api/health');
     const health = await healthRes.json();
     if (health.cloud) {
-      const logoutBtn = document.getElementById('btn-logout');
-      if (logoutBtn) logoutBtn.style.display = '';
+      const logoutRow = document.getElementById('sidebar-logout-row');
+      if (logoutRow) logoutRow.style.display = '';
     }
   } catch { /* ignore */ }
+
+  handleHashRoute();
+  window.addEventListener('hashchange', handleHashRoute);
 }
 
 // ── Projects ──────────────────────────────────────────────────────────────────
