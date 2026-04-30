@@ -26,11 +26,11 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // ── Static frontend ───────────────────────────────────────────────────────────
-// In dev (tsx): __dirname is src/server, so go up 3 levels to project root
-// In prod (dist): __dirname is dist, so go up 2 levels
+// In dev (tsx): __dirname is src/server, so go up 2 levels to project root/public
+// In prod (dist): __dirname is dist/server, so go up 2 levels to /app/public
 const isCompiled = __dirname.includes('/dist');
 const publicDir = isCompiled
-  ? path.join(__dirname, '..', 'public')
+  ? path.join(__dirname, '..', '..', 'public')
   : path.join(__dirname, '..', '..', 'public');
 
 app.use(express.static(publicDir));

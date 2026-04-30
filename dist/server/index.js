@@ -20,13 +20,32 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // ── Static frontend ───────────────────────────────────────────────────────────
-// In dev (tsx): __dirname is src/server, so go up 3 levels to project root
-// In prod (dist): __dirname is dist, so go up 2 levels
+// In dev (tsx): __dirname is src/server, so go up 2 levels to project root/public
+// In prod (dist): __dirname is dist/server, so go up 2 levels to /app/public
 const isCompiled = __dirname.includes('/dist');
 const publicDir = isCompiled
-    ? path.join(__dirname, '..', 'public')
+    ? path.join(__dirname, '..', '..', 'public')
     : path.join(__dirname, '..', '..', 'public');
 app.use(express.static(publicDir));
+// ── Cloud token relay (sets auth cookie from query param) ─────────────────────
+// Usage: notes.yoinko.ai/auth/login?token=<JWT>&redirect=/
+// This lets the yoinko.ai website hand off auth to the notes subdomain.
+app.get('/auth/login', (req, res) => {
+    const token = req.query.token;
+    const redirect = req.query.redirect || '/';
+    if (!token) {
+        return void res.status(400).send('Missing token');
+    }
+    // Set the auth cookie on this domain
+    res.cookie('yoinko_token', token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+        path: '/',
+    });
+    res.redirect(redirect);
+});
 // ── Cloud auth (no-op when YOINKO_CLOUD is not set) ───────────────────────────
 app.use(cloudAuth);
 // ── API Routes ────────────────────────────────────────────────────────────────

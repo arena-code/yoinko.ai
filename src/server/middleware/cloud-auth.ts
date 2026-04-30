@@ -243,6 +243,7 @@ export function cloudAuth(req: Request, res: Response, next: NextFunction): void
       return;
     }
 
+    console.error('[cloud-auth] JWT verify failed:', err.name, err.message);
     res.status(403).json({ error: 'Invalid token' });
   }
 }

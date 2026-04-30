@@ -200,6 +200,7 @@ export function cloudAuth(req, res, next) {
             res.redirect(`https://yoinko.ai/login?redirect=${redirect}`);
             return;
         }
+        console.error('[cloud-auth] JWT verify failed:', err.name, err.message);
         res.status(403).json({ error: 'Invalid token' });
     }
 }
