@@ -5,7 +5,7 @@ import path from 'path';
 import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
 import { getProjectDb } from '../db.js';
-import { getProjectDirs } from '../projects.js';
+import { getProjectDirs, listProjects } from '../projects.js';
 import type { Asset } from '../../shared/types.js';
 
 const router = express.Router();
@@ -15,10 +15,15 @@ function projectId(req: Request): string {
   return (req.headers['x-project-id'] as string) || 'default';
 }
 
+/** Get tenant data dir from request (set by cloud-auth middleware) */
+function dataDir(req: Request): string | undefined {
+  return (req as any).tenantDataDir;
+}
+
 // Dynamic multer storage — destination resolved per-request from X-Project-Id
 const storage = multer.diskStorage({
   destination: (req, _file, cb) => {
-    const { uploadsDir } = getProjectDirs(projectId(req));
+    const { uploadsDir } = getProjectDirs(projectId(req), dataDir(req));
     fs.mkdirSync(uploadsDir, { recursive: true });
     cb(null, uploadsDir);
   },
@@ -44,7 +49,7 @@ const upload = multer({
 router.post('/upload', upload.array('files', 20), (req: Request, res: Response) => {
   try {
     const { page_id } = req.body as { page_id?: string };
-    const db = getProjectDb(projectId(req));
+    const db = getProjectDb(projectId(req), dataDir(req));
     const files = req.files as Express.Multer.File[];
     const results: Asset[] = [];
 
@@ -77,7 +82,7 @@ router.post('/upload', upload.array('files', 20), (req: Request, res: Response) 
 router.get('/', (req: Request, res: Response) => {
   try {
     const { page_id } = req.query as { page_id?: string };
-    const db = getProjectDb(projectId(req));
+    const db = getProjectDb(projectId(req), dataDir(req));
     let assets: Omit<Asset, 'url'>[];
     if (page_id) {
       assets = db.prepare<string, Omit<Asset, 'url'>>(
@@ -97,7 +102,7 @@ router.get('/', (req: Request, res: Response) => {
 // ── GET /api/assets/:id ───────────────────────────────────────────────────────
 router.get('/:id', (req: Request, res: Response) => {
   try {
-    const db = getProjectDb(projectId(req));
+    const db = getProjectDb(projectId(req), dataDir(req));
     const asset = db.prepare<string, Omit<Asset, 'url'>>(
       `SELECT * FROM assets WHERE id = ?`
     ).get(req.params.id as string);
@@ -114,20 +119,20 @@ router.get('/:id', (req: Request, res: Response) => {
 router.get('/:id/file', async (req: Request, res: Response) => {
   try {
     const pid = projectId(req);
-    const { listProjects } = await import('../projects.js');
-    const projects = listProjects();
+    const dd = dataDir(req);
+    const projects = listProjects(dd);
 
     // Try current project first, then all others
     const searchOrder = [pid, ...projects.map(p => p.id).filter(id => id !== pid)];
 
     for (const searchPid of searchOrder) {
-      const db = getProjectDb(searchPid);
+      const db = getProjectDb(searchPid, dd);
       const asset = db.prepare<string, Omit<Asset, 'url'>>(
         `SELECT * FROM assets WHERE id = ?`
       ).get(req.params.id as string);
 
       if (asset) {
-        const { uploadsDir } = getProjectDirs(searchPid);
+        const { uploadsDir } = getProjectDirs(searchPid, dd);
         const filePath = path.join(uploadsDir, asset.filename);
         if (!fs.existsSync(filePath)) break;
         res.setHeader('Content-Type', asset.mime_type ?? 'application/octet-stream');
@@ -146,8 +151,9 @@ router.get('/:id/file', async (req: Request, res: Response) => {
 router.delete('/:id', (req: Request, res: Response) => {
   try {
     const pid = projectId(req);
-    const db = getProjectDb(pid);
-    const { uploadsDir } = getProjectDirs(pid);
+    const dd = dataDir(req);
+    const db = getProjectDb(pid, dd);
+    const { uploadsDir } = getProjectDirs(pid, dd);
 
     const asset = db.prepare<string, Omit<Asset, 'url'>>(
       `SELECT * FROM assets WHERE id = ?`

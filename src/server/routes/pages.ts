@@ -16,10 +16,15 @@ function projectId(req: Request): string {
   return (req.headers['x-project-id'] as string) || 'default';
 }
 
+/** Get tenant data dir from request (set by cloud-auth middleware) */
+function dataDir(req: Request): string | undefined {
+  return (req as any).tenantDataDir;
+}
+
 // ── GET /api/pages — full tree ────────────────────────────────────────────────
 router.get('/', (req: Request, res: Response) => {
   try {
-    const pagesDir = getPagesDir(projectId(req));
+    const pagesDir = getPagesDir(projectId(req), dataDir(req));
     const tree = scanDir(pagesDir);
     res.json({ pages: tree });
   } catch (err) {
@@ -30,7 +35,7 @@ router.get('/', (req: Request, res: Response) => {
 // ── GET /api/pages/flat — flat list ──────────────────────────────────────────
 router.get('/flat', (req: Request, res: Response) => {
   try {
-    const pagesDir = getPagesDir(projectId(req));
+    const pagesDir = getPagesDir(projectId(req), dataDir(req));
     const tree = scanDir(pagesDir);
     const flat = flattenTree(tree);
     res.json({ pages: flat });
@@ -43,8 +48,9 @@ router.get('/flat', (req: Request, res: Response) => {
 router.get('/:id', (req: Request, res: Response) => {
   try {
     const pid = projectId(req);
-    const pagesDir = getPagesDir(pid);
-    const db = getProjectDb(pid);
+    const dd = dataDir(req);
+    const pagesDir = getPagesDir(pid, dd);
+    const db = getProjectDb(pid, dd);
 
     const relPath = fromId(req.params.id as string);
     const tree = scanDir(pagesDir);
@@ -80,7 +86,7 @@ router.get('/:id', (req: Request, res: Response) => {
 router.post('/', (req: Request, res: Response) => {
   try {
     const pid = projectId(req);
-    const pagesDir = getPagesDir(pid);
+    const pagesDir = getPagesDir(pid, dataDir(req));
 
     const { name, type, file_type, parent_id, content } = req.body as {
       name?: string;
@@ -121,7 +127,7 @@ router.post('/', (req: Request, res: Response) => {
 router.put('/:id', (req: Request, res: Response) => {
   try {
     const pid = projectId(req);
-    const pagesDir = getPagesDir(pid);
+    const pagesDir = getPagesDir(pid, dataDir(req));
 
     const relPath = fromId(req.params.id as string);
     const { content, name } = req.body as { content?: string; name?: string };
@@ -152,7 +158,7 @@ router.put('/:id', (req: Request, res: Response) => {
 router.delete('/:id', (req: Request, res: Response) => {
   try {
     const pid = projectId(req);
-    const pagesDir = getPagesDir(pid);
+    const pagesDir = getPagesDir(pid, dataDir(req));
     const relPath = fromId(req.params.id as string);
     deletePath(pagesDir, relPath);
     res.json({ success: true });

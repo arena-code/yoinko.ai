@@ -7,8 +7,8 @@ import type { PageNode } from '../shared/types.js';
 import { getProjectDirs } from './projects.js';
 
 // ── Project pages dir ─────────────────────────────────────────────────────────
-export function getPagesDir(projectId: string = 'default'): string {
-  const { pagesDir } = getProjectDirs(projectId);
+export function getPagesDir(projectId: string = 'default', dataDir?: string): string {
+  const { pagesDir } = getProjectDirs(projectId, dataDir);
   if (!fs.existsSync(pagesDir)) {
     fs.mkdirSync(pagesDir, { recursive: true });
     seedInitialContent(pagesDir);

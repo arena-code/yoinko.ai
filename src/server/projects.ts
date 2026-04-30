@@ -1,10 +1,12 @@
 // src/server/projects.ts — Multi-project registry and migration
+// In cloud mode, DATA_DIR is per-tenant (resolved from request).
+// In self-hosted mode, DATA_DIR is a module-level constant (unchanged).
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { STATIC_DATA_DIR, CLOUD_ENABLED } from './tenant-context.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-export const DATA_DIR = path.join(__dirname, '..', '..', 'data');
+// Self-hosted: use the static data dir
+export const DATA_DIR = STATIC_DATA_DIR;
 
 export interface Project {
   id: string;        // slug, e.g. "default", "my-work"
@@ -12,24 +14,28 @@ export interface Project {
   created_at: string;
 }
 
-const REGISTRY_PATH = path.join(DATA_DIR, 'projects.json');
-
 // ── Registry helpers ──────────────────────────────────────────────────────────
-export function listProjects(): Project[] {
-  if (!fs.existsSync(REGISTRY_PATH)) return [];
+
+function registryPath(dataDir: string): string {
+  return path.join(dataDir, 'projects.json');
+}
+
+export function listProjects(dataDir: string = DATA_DIR): Project[] {
+  const rp = registryPath(dataDir);
+  if (!fs.existsSync(rp)) return [];
   try {
-    return JSON.parse(fs.readFileSync(REGISTRY_PATH, 'utf8')) as Project[];
+    return JSON.parse(fs.readFileSync(rp, 'utf8')) as Project[];
   } catch {
     return [];
   }
 }
 
-function saveProjects(projects: Project[]): void {
-  fs.writeFileSync(REGISTRY_PATH, JSON.stringify(projects, null, 2));
+function saveProjects(projects: Project[], dataDir: string = DATA_DIR): void {
+  fs.writeFileSync(registryPath(dataDir), JSON.stringify(projects, null, 2));
 }
 
-export function getProject(id: string): Project | undefined {
-  return listProjects().find(p => p.id === id);
+export function getProject(id: string, dataDir: string = DATA_DIR): Project | undefined {
+  return listProjects(dataDir).find(p => p.id === id);
 }
 
 function slugify(name: string): string {
@@ -47,32 +53,32 @@ function uniqueSlug(base: string, existing: string[]): string {
   return slug;
 }
 
-export function createProject(name: string): Project {
-  const projects = listProjects();
+export function createProject(name: string, dataDir: string = DATA_DIR): Project {
+  const projects = listProjects(dataDir);
   const id = uniqueSlug(slugify(name), projects.map(p => p.id));
   const project: Project = { id, name, created_at: new Date().toISOString() };
   projects.push(project);
-  saveProjects(projects);
-  ensureProjectDirs(id);
+  saveProjects(projects, dataDir);
+  ensureProjectDirs(id, dataDir);
   return project;
 }
 
-export function renameProject(id: string, name: string): Project {
-  const projects = listProjects();
+export function renameProject(id: string, name: string, dataDir: string = DATA_DIR): Project {
+  const projects = listProjects(dataDir);
   const idx = projects.findIndex(p => p.id === id);
   if (idx === -1) throw new Error(`Project not found: ${id}`);
   projects[idx].name = name;
-  saveProjects(projects);
+  saveProjects(projects, dataDir);
   return projects[idx];
 }
 
-export function deleteProject(id: string): void {
+export function deleteProject(id: string, dataDir: string = DATA_DIR): void {
   if (id === 'default') throw new Error('Cannot delete the default project');
-  const projects = listProjects();
+  const projects = listProjects(dataDir);
   const project = projects.find(p => p.id === id);
   if (!project) throw new Error(`Project not found: ${id}`);
 
-  const { pagesDir } = getProjectDirs(id);
+  const { pagesDir } = getProjectDirs(id, dataDir);
   if (fs.existsSync(pagesDir)) {
     const entries = fs.readdirSync(pagesDir);
     if (entries.length > 0) {
@@ -81,10 +87,10 @@ export function deleteProject(id: string): void {
   }
 
   // Remove project directory
-  const projectDir = path.join(DATA_DIR, id);
+  const projectDir = path.join(dataDir, id);
   if (fs.existsSync(projectDir)) fs.rmSync(projectDir, { recursive: true });
 
-  saveProjects(projects.filter(p => p.id !== id));
+  saveProjects(projects.filter(p => p.id !== id), dataDir);
 }
 
 // ── Directory helpers ─────────────────────────────────────────────────────────
@@ -94,8 +100,8 @@ export interface ProjectDirs {
   dbPath: string;
 }
 
-export function getProjectDirs(id: string): ProjectDirs {
-  const projectDir = path.join(DATA_DIR, id);
+export function getProjectDirs(id: string, dataDir: string = DATA_DIR): ProjectDirs {
+  const projectDir = path.join(dataDir, id);
   return {
     pagesDir: path.join(projectDir, 'pages'),
     uploadsDir: path.join(projectDir, 'uploads'),
@@ -103,15 +109,22 @@ export function getProjectDirs(id: string): ProjectDirs {
   };
 }
 
-function ensureProjectDirs(id: string): void {
-  const { pagesDir, uploadsDir } = getProjectDirs(id);
+function ensureProjectDirs(id: string, dataDir: string = DATA_DIR): void {
+  const { pagesDir, uploadsDir } = getProjectDirs(id, dataDir);
   fs.mkdirSync(pagesDir, { recursive: true });
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
 // ── Startup migration ─────────────────────────────────────────────────────────
 // Migrates old flat data/ structure → data/default/
+// In cloud mode, this runs per-tenant on first login (handled by cloud-auth).
 export function migrateOnStartup(): void {
+  // Skip in cloud mode — migration is per-tenant on first login
+  if (CLOUD_ENABLED) {
+    console.log('  [projects] Cloud mode — skipping global migration');
+    return;
+  }
+
   const oldPagesDir = path.join(DATA_DIR, 'pages');
   const oldUploadsDir = path.join(DATA_DIR, 'uploads');
   const oldDbPath = path.join(DATA_DIR, 'notas.db');

@@ -15,6 +15,11 @@ function projectId(req: Request): string {
   return (req.headers['x-project-id'] as string) || 'default';
 }
 
+/** Get tenant data dir from request (set by cloud-auth middleware) */
+function dataDir(req: Request): string | undefined {
+  return (req as any).tenantDataDir;
+}
+
 // ── POST /api/ai/generate — one-shot content generation ──────────────────────
 router.post('/generate', async (req: Request, res: Response) => {
   try {
@@ -63,7 +68,7 @@ router.post('/chat', async (req: Request, res: Response) => {
 
   const send = (data: object) => res.write(`data: ${JSON.stringify(data)}\n\n`);
   const pid = projectId(req);
-  const db = getProjectDb(pid);
+  const db = getProjectDb(pid, dataDir(req));
 
   try {
     const systemMsg: LLMMessage = {
@@ -106,8 +111,9 @@ router.post('/image', async (req: Request, res: Response) => {
     if (!prompt) return void res.status(400).json({ error: 'prompt is required' });
 
     const pid = projectId(req);
-    const db = getProjectDb(pid);
-    const { uploadsDir } = getProjectDirs(pid);
+    const dd = dataDir(req);
+    const db = getProjectDb(pid, dd);
+    const { uploadsDir } = getProjectDirs(pid, dd);
     fs.mkdirSync(uploadsDir, { recursive: true });
 
     const result = await generateImage(prompt);
@@ -155,7 +161,7 @@ router.get('/chat/history', (req: Request, res: Response) => {
   try {
     const { page_id } = req.query as { page_id?: string };
     if (!page_id) return void res.json({ messages: [] });
-    const db = getProjectDb(projectId(req));
+    const db = getProjectDb(projectId(req), dataDir(req));
     const messages = db.prepare<string, ChatMessage>(
       `SELECT * FROM chat_messages WHERE page_id = ? ORDER BY created_at ASC`
     ).all(page_id);

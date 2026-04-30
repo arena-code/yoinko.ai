@@ -60,7 +60,9 @@
   box-sizing: border-box;
 }
 
-.hidden { display: none !important; }
+.hidden {
+  display: none !important;
+}
 
 html {
   font-size: 16px;
@@ -1161,18 +1163,6 @@ body {
   background: linear-gradient(180deg, var(--butter) 0%, white 100%);
 }
 
-.chat-header-icon {
-  width: 36px;
-  height: 44px;
-  background: var(--accent-dim);
-  border: 2px solid var(--border-strong);
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
-}
-
 .chat-header-title {
   font-size: 15px;
   font-weight: 700;
@@ -1198,6 +1188,27 @@ body {
 
 .chat-msg {
   display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.chat-msg.user {
+  flex-direction: row-reverse;
+}
+
+.chat-msg-avatar {
+  width: 30px;
+  height: 30px;
+  object-fit: cover;
+  flex-shrink: 0;
+  margin-top: 18px;
+  padding: 3px;
+}
+
+.chat-msg-bubble {
+  flex: 1;
+  min-width: 0;
+  display: flex;
   flex-direction: column;
   gap: 4px;
 }
@@ -1213,6 +1224,9 @@ body {
 
 .chat-msg.user .chat-msg-role {
   color: var(--tomato);
+  text-align: right;
+  padding-right: 2px;
+  padding-left: 0;
 }
 
 .chat-msg-content {
@@ -1376,30 +1390,88 @@ body {
 /* Chat toggle FAB */
 .chat-toggle {
   position: fixed;
-  bottom: 32px;
-  right: 20px;
-  width: 52px;
-  height: 52px;
-  border-radius: var(--radius-pill);
-  background: white;
-  border: 2.5px solid var(--ink);
-  color: var(--ink);
+  bottom: 60px;
+  right: 60px;
+  width: 70px;
+  height: 70px;
+  background: transparent;
+  border: none;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: var(--shadow-btn);
-  transition: all 0.15s;
+  transition:
+    transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1),
+    filter 0.25s;
   z-index: 20;
+  padding: 0;
 }
 .chat-toggle:hover {
-  background: var(--butter);
-  transform: translate(-2px, -2px);
-  box-shadow: 5px 5px 0 var(--ink);
+  transform: translate(-2px, -3px) scale(1);
 }
-.chat-toggle svg {
-  width: 20px;
-  height: 20px;
+.chat-toggle:active {
+  transform: translate(1px, 1px) scale(0.96);
+}
+.chat-toggle-mascot {
+  width: 70px;
+  height: 70px;
+  object-fit: contain;
+  pointer-events: none;
+  filter: drop-shadow(3px 3px 0 var(--ink));
+  transition:
+    filter 0.25s,
+    transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.chat-toggle:hover .chat-toggle-mascot {
+  filter: drop-shadow(5px 5px 0 var(--ink));
+  transform: rotate(-6deg);
+}
+.chat-toggle:active .chat-toggle-mascot {
+  filter: drop-shadow(2px 2px 0 var(--ink));
+}
+
+/* Tooltip */
+.chat-toggle::before {
+  content: "Ask Yoinko ✨";
+  position: absolute;
+  right: calc(100% + 12px);
+  top: 50%;
+  transform: translateY(-50%) scale(0.9);
+  white-space: nowrap;
+  font-family: "Fredoka", sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--butter);
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-pill);
+  padding: 6px 14px;
+  box-shadow: 2px 2px 0 var(--ink);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.chat-toggle:hover::before {
+  opacity: 1;
+  transform: translateY(-50%) scale(1);
+}
+
+/* Empty-state mascot in chat */
+.chat-empty-mascot {
+  width: 100px;
+  height: 100px;
+  object-fit: contain;
+  margin-bottom: 16px;
+  animation: mascotFloat 3s ease-in-out infinite;
+}
+@keyframes mascotFloat {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -2518,7 +2590,9 @@ body {
   border-radius: 14px;
   padding: 8px;
   z-index: 300;
-  box-shadow: 0 16px 40px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.08);
+  box-shadow:
+    0 16px 40px rgba(0, 0, 0, 0.18),
+    0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
 .project-menu.open {
@@ -2527,8 +2601,14 @@ body {
 }
 
 @keyframes pm-pop {
-  from { opacity: 0; transform: translateX(-50%) translateY(-4px) scale(0.98); }
-  to   { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1);
+  }
 }
 
 .project-menu-label {
@@ -2614,7 +2694,10 @@ body {
   border-radius: 4px;
   cursor: pointer;
   opacity: 0;
-  transition: opacity 0.1s, background 0.1s, color 0.1s;
+  transition:
+    opacity 0.1s,
+    background 0.1s,
+    color 0.1s;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2682,7 +2765,9 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.1s, color 0.1s;
+  transition:
+    background 0.1s,
+    color 0.1s;
   padding: 0;
 }
 

@@ -1298,13 +1298,16 @@ ${code}
   function renderChatMessages() {
     const container = $("chat-messages");
     if (!state.chatMessages.length) {
-      container.innerHTML = `<div style="text-align:center;padding:32px 0;color:var(--text-dim);font-size:13px;"><div style="font-size:32px;margin-bottom:8px">\u{1F916}</div>Ask me anything about this page, or request edits!</div>`;
+      container.innerHTML = `<div style="text-align:center;padding:40px 16px;color:var(--text-dim);font-size:14px;"><img src="/mascot.svg" alt="Yoinko" class="chat-empty-mascot"><div>Ask me anything about this page,<br>or request changes!</div></div>`;
       return;
     }
     container.innerHTML = state.chatMessages.map((m) => `
     <div class="chat-msg ${m.role}">
-      <div class="chat-msg-role">${m.role === "user" ? "You" : "AI"}</div>
-      <div class="chat-msg-content">${m.role === "assistant" ? renderMarkdownSimple(m.content) : esc(m.content)}</div>
+      ${m.role === "assistant" ? '<img src="/mascot.svg" alt="AI" class="chat-msg-avatar">' : ""}
+      <div class="chat-msg-bubble">
+        <div class="chat-msg-role">${m.role === "user" ? "You" : "Yoinko"}</div>
+        <div class="chat-msg-content">${m.role === "assistant" ? renderMarkdownSimple(m.content) : esc(m.content)}</div>
+      </div>
     </div>
   `).join("");
     container.scrollTop = container.scrollHeight;
@@ -1323,8 +1326,11 @@ ${code}
     const typingId = "typing-" + Date.now();
     $("chat-messages").innerHTML += `
     <div class="chat-msg assistant" id="${typingId}">
-      <div class="chat-msg-role">AI</div>
-      <div class="chat-typing"><div class="chat-typing-dot"></div><div class="chat-typing-dot"></div><div class="chat-typing-dot"></div></div>
+      <img src="/mascot.svg" alt="AI" class="chat-msg-avatar">
+      <div class="chat-msg-bubble">
+        <div class="chat-msg-role">Yoinko</div>
+        <div class="chat-typing"><div class="chat-typing-dot"></div><div class="chat-typing-dot"></div><div class="chat-typing-dot"></div></div>
+      </div>
     </div>
   `;
     $("chat-messages").scrollTop = $("chat-messages").scrollHeight;
@@ -1541,6 +1547,10 @@ ${code}
     document.addEventListener("click", (e) => {
       if (!e.target.closest(".compose-popup") && !e.target.closest("#compose-btn")) {
         $("compose-popup").classList.remove("open");
+      }
+      if (state.chatOpen && !e.target.closest(".chat-drawer") && !e.target.closest("#chat-toggle")) {
+        state.chatOpen = false;
+        $("chat-drawer").classList.remove("open");
       }
     });
     $("confirm-delete-cancel").addEventListener("click", () => closeConfirmDelete(false));
