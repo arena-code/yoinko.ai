@@ -278,7 +278,7 @@ async function verifyAndContinue(token: string, req: Request, res: Response, nex
         res.status(403).json({ error: 'No active subscription' });
         return;
       }
-      sendAuthBlockPage(res, 'no active subscription', 'you need an active yoinko cloud subscription to use this app.', 'go to dashboard', 'https://yoinko.ai/dashboard');
+      sendAuthBlockPage(res, 'no active subscription', 'you need an active yoinko cloud subscription to use this app.', 'go to dashboard', 'https://yoinko.ai/dashboard', true);
       return;
     }
 
@@ -314,7 +314,15 @@ async function verifyAndContinue(token: string, req: Request, res: Response, nex
 }
 
 // ── Blocking auth page ────────────────────────────────────────────────────────
-function sendAuthBlockPage(res: Response, title: string, message: string, buttonLabel: string, buttonUrl: string) {
+function sendAuthBlockPage(res: Response, title: string, message: string, buttonLabel: string, buttonUrl: string, showSignOut = false) {
+  const isExpired = title.includes('expired');
+  const isSub = title.includes('subscription');
+  const iconSvg = isSub
+    ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>`
+    : isExpired
+    ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`
+    : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>`;
+
   res.status(401).send(`<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -324,158 +332,188 @@ function sendAuthBlockPage(res: Response, title: string, message: string, button
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 
     body {
       font-family: 'Fredoka', sans-serif;
-      background: #1a1a2e;
+      background: #0f0f1a;
       min-height: 100vh;
       display: flex;
       align-items: center;
       justify-content: center;
       overflow: hidden;
-    }
-
-    /* Animated background */
-    body::before {
-      content: '';
-      position: fixed;
-      inset: 0;
-      background:
-        radial-gradient(ellipse at 20% 50%, rgba(255, 90, 54, 0.08) 0%, transparent 50%),
-        radial-gradient(ellipse at 80% 50%, rgba(255, 138, 101, 0.06) 0%, transparent 50%);
-      animation: bgPulse 6s ease-in-out infinite alternate;
-    }
-
-    @keyframes bgPulse {
-      0% { opacity: 0.6; }
-      100% { opacity: 1; }
-    }
-
-    .auth-block {
       position: relative;
-      z-index: 10;
-      text-align: center;
-      max-width: 420px;
-      width: 90%;
     }
 
-    .auth-block-logo {
-      width: 140px;
-      margin-bottom: 32px;
-      opacity: 0.9;
-      filter: brightness(0) invert(1);
+    /* ── Mesh gradient background ── */
+    .bg-mesh {
+      position: fixed; inset: 0;
+      background:
+        radial-gradient(ellipse 80% 60% at 15% 30%, rgba(255,90,54,.12) 0%, transparent 70%),
+        radial-gradient(ellipse 60% 80% at 85% 70%, rgba(255,160,100,.08) 0%, transparent 70%),
+        radial-gradient(ellipse 50% 50% at 50% 50%, rgba(100,80,200,.05) 0%, transparent 70%);
+      animation: mesh 12s ease-in-out infinite alternate;
+    }
+    @keyframes mesh {
+      0% { filter: hue-rotate(0deg); opacity: .8; }
+      100% { filter: hue-rotate(10deg); opacity: 1; }
     }
 
-    .auth-block-card {
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      border-radius: 24px;
-      padding: 48px 36px 40px;
-      animation: slideUp 0.5s ease-out;
+    /* ── Floating orbs ── */
+    .orb {
+      position: fixed; border-radius: 50%;
+      filter: blur(80px); opacity: .35;
+      animation: orbF 8s ease-in-out infinite alternate;
+    }
+    .o1 { width:300px;height:300px;background:rgba(255,90,54,.15);top:-100px;left:-80px;animation-duration:10s }
+    .o2 { width:200px;height:200px;background:rgba(255,160,100,.1);bottom:-60px;right:-40px;animation-delay:3s;animation-duration:8s }
+    .o3 { width:150px;height:150px;background:rgba(120,100,255,.08);top:40%;right:15%;animation-delay:5s;animation-duration:12s }
+    @keyframes orbF {
+      0% { transform: translate(0,0) scale(1); }
+      100% { transform: translate(30px,-20px) scale(1.1); }
     }
 
-    @keyframes slideUp {
-      from { opacity: 0; transform: translateY(20px); }
-      to { opacity: 1; transform: translateY(0); }
+    /* ── Noise texture ── */
+    .noise {
+      position: fixed; inset: 0; opacity: .03;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+      pointer-events: none;
     }
 
-    .auth-block-icon {
-      width: 56px;
-      height: 56px;
-      border-radius: 16px;
-      background: rgba(255, 90, 54, 0.12);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin: 0 auto 24px;
+    /* ── Content ── */
+    .wrap {
+      position: relative; z-index: 10;
+      text-align: center; max-width: 440px; width: 90%;
     }
 
-    .auth-block-icon svg {
-      width: 28px;
-      height: 28px;
-      stroke: #FF5A36;
+    .logo {
+      width: 120px; margin-bottom: 36px;
+      opacity: .85; filter: brightness(0) invert(1);
+      animation: fadeIn .6s ease-out;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-8px); }
+      to { opacity: .85; transform: translateY(0); }
     }
 
-    .auth-block-card h1 {
-      font-size: 22px;
-      font-weight: 500;
-      color: rgba(255, 255, 255, 0.9);
-      margin-bottom: 10px;
-      letter-spacing: -0.02em;
+    .card {
+      background: rgba(255,255,255,.03);
+      border: 1px solid rgba(255,255,255,.06);
+      backdrop-filter: blur(40px) saturate(1.2);
+      -webkit-backdrop-filter: blur(40px) saturate(1.2);
+      border-radius: 28px;
+      padding: 52px 40px 44px;
+      animation: cardIn .6s cubic-bezier(.16,1,.3,1) .1s both;
+      position: relative; overflow: hidden;
+    }
+    .card::before {
+      content: ''; position: absolute; inset: -1px;
+      border-radius: 28px;
+      background: linear-gradient(135deg, rgba(255,90,54,.08) 0%, transparent 40%, transparent 60%, rgba(255,160,100,.04) 100%);
+      pointer-events: none;
+    }
+    @keyframes cardIn {
+      from { opacity: 0; transform: translateY(24px) scale(.96); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
     }
 
-    .auth-block-card p {
-      font-size: 14px;
-      color: rgba(255, 255, 255, 0.4);
-      line-height: 1.65;
-      margin-bottom: 28px;
+    .icon-wrap {
+      width: 64px; height: 64px; border-radius: 20px;
+      background: rgba(255,90,54,.1);
+      border: 1px solid rgba(255,90,54,.15);
+      display: flex; align-items: center; justify-content: center;
+      margin: 0 auto 28px;
+      animation: pulse 3s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%,100% { box-shadow: 0 0 0 0 rgba(255,90,54,.1); }
+      50% { box-shadow: 0 0 0 12px rgba(255,90,54,0); }
+    }
+    .icon-wrap svg { width: 28px; height: 28px; stroke: #FF5A36; }
+
+    .card h1 {
+      font-size: 24px; font-weight: 600;
+      color: rgba(255,255,255,.92);
+      margin-bottom: 12px; letter-spacing: -.03em; line-height: 1.2;
+    }
+    .card p {
+      font-size: 14px; color: rgba(255,255,255,.38);
+      line-height: 1.7; margin-bottom: 32px;
+      max-width: 320px; margin-left: auto; margin-right: auto;
     }
 
-    .auth-block-btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
+    .cta {
+      display: inline-flex; align-items: center; gap: 8px;
       font-family: 'Fredoka', sans-serif;
-      font-size: 15px;
-      font-weight: 600;
-      color: white;
-      background: linear-gradient(135deg, #FF5A36, #ff8a65);
-      border: none;
-      border-radius: 14px;
-      padding: 14px 32px;
-      cursor: pointer;
-      text-decoration: none;
-      transition: transform 0.15s, box-shadow 0.15s;
-      box-shadow: 0 4px 20px rgba(255, 90, 54, 0.3);
+      font-size: 15px; font-weight: 600; color: #fff;
+      background: linear-gradient(135deg, #FF5A36, #ff7a55);
+      border: none; border-radius: 14px; padding: 14px 36px;
+      cursor: pointer; text-decoration: none;
+      transition: all .2s cubic-bezier(.16,1,.3,1);
+      box-shadow: 0 4px 16px rgba(255,90,54,.25), 0 1px 3px rgba(0,0,0,.2), inset 0 1px 0 rgba(255,255,255,.15);
+      position: relative; overflow: hidden;
     }
-
-    .auth-block-btn:hover {
+    .cta::after {
+      content: ''; position: absolute; inset: 0;
+      background: linear-gradient(135deg, transparent, rgba(255,255,255,.1));
+      opacity: 0; transition: opacity .2s;
+    }
+    .cta:hover {
       transform: translateY(-2px);
-      box-shadow: 0 6px 28px rgba(255, 90, 54, 0.4);
+      box-shadow: 0 8px 28px rgba(255,90,54,.35), 0 2px 6px rgba(0,0,0,.2), inset 0 1px 0 rgba(255,255,255,.15);
+    }
+    .cta:hover::after { opacity: 1; }
+    .cta:active { transform: translateY(0); }
+    .cta svg { width: 16px; height: 16px; transition: transform .2s; }
+    .cta:hover svg { transform: translateX(3px); }
+
+    .signout { margin-top: 20px; }
+    .signout a {
+      font-size: 13px; color: rgba(255,255,255,.25);
+      text-decoration: none; transition: all .2s;
+      padding: 6px 14px; border-radius: 8px;
+    }
+    .signout a:hover {
+      color: rgba(255,255,255,.6);
+      background: rgba(255,255,255,.04);
     }
 
-    .auth-block-btn:active {
-      transform: translateY(0);
+    .foot {
+      margin-top: 24px; font-size: 11px;
+      color: rgba(255,255,255,.12); letter-spacing: .02em;
     }
-
-    .auth-block-footer {
-      margin-top: 20px;
-      font-size: 12px;
-      color: rgba(255, 255, 255, 0.2);
+    .foot a {
+      color: rgba(255,255,255,.2);
+      text-decoration: none; transition: color .2s;
     }
+    .foot a:hover { color: rgba(255,255,255,.45); }
 
-    .auth-block-footer a {
-      color: rgba(255, 255, 255, 0.35);
-      text-decoration: none;
-    }
-
-    .auth-block-footer a:hover {
-      color: rgba(255, 255, 255, 0.55);
+    @media (max-width: 480px) {
+      .card { padding: 40px 28px 36px; }
+      .card h1 { font-size: 20px; }
     }
   </style>
 </head>
 <body>
-  <div class="auth-block">
-    <img src="/yoinko-logo.svg" alt="yoinko" class="auth-block-logo" onerror="this.style.display='none'">
-    <div class="auth-block-card">
-      <div class="auth-block-icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-          <path d="M7 11V7a5 5 0 0110 0v4" />
-        </svg>
-      </div>
+  <div class="bg-mesh"></div>
+  <div class="orb o1"></div>
+  <div class="orb o2"></div>
+  <div class="orb o3"></div>
+  <div class="noise"></div>
+  <div class="wrap">
+    <img src="/yoinko-logo.svg" alt="yoinko" class="logo" onerror="this.style.display='none'">
+    <div class="card">
+      <div class="icon-wrap">${iconSvg}</div>
       <h1>${title}</h1>
       <p>${message}</p>
-      <a href="${buttonUrl}" class="auth-block-btn">${buttonLabel} →</a>
-      <div class="auth-block-footer">
-        <a href="https://yoinko.ai">yoinko.ai</a>
-      </div>
+      <a href="${buttonUrl}" class="cta">
+        ${buttonLabel}
+        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+      </a>
+      ${showSignOut ? `<div class="signout"><a href="/auth/logout" onclick="try{localStorage.clear();sessionStorage.clear()}catch(e){}">sign out of this account</a></div>` : ''}
+      <div class="foot"><a href="https://yoinko.ai">yoinko.ai</a></div>
     </div>
   </div>
 </body>
 </html>`);
 }
-

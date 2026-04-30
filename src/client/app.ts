@@ -176,13 +176,25 @@ async function init(): Promise<void> {
   await loadPages();
   setupEventListeners();
 
-  // Cloud mode — show logout button (before handleHashRoute which can throw)
+  // Cloud mode — show user info + logout button
   try {
     const healthRes = await fetch('/api/health');
     const health = await healthRes.json();
     if (health.cloud) {
-      const logoutRow = document.getElementById('sidebar-logout-row');
-      if (logoutRow) logoutRow.style.display = '';
+      const userRow = document.getElementById('sidebar-user-row');
+      if (userRow) userRow.style.display = '';
+
+      // Fetch user details
+      try {
+        const meRes = await fetch('/api/me');
+        const me = await meRes.json();
+        if (me.user) {
+          const emailEl = document.getElementById('sidebar-user-email');
+          const tenantEl = document.getElementById('sidebar-user-tenant');
+          if (emailEl && me.user.email) emailEl.textContent = me.user.email;
+          if (tenantEl && me.user.tenantId) tenantEl.textContent = me.user.tenantId + '.yoinko.ai';
+        }
+      } catch { /* ignore */ }
     }
   } catch { /* ignore */ }
 
@@ -242,8 +254,7 @@ function renderProjectSwitcher(): void {
              onkeydown="if(event.key==='Enter'||event.key===' ')switchProject('${p.id}')">
           <span class="project-menu-avatar" ${avatarStyle(p.name, p.id === 'default')}>${initials(p.name)}</span>
           <span class="project-menu-item-name">${p.name}</span>
-          ${p.id !== 'default'
-            ? `<span class="project-menu-actions">
+          <span class="project-menu-actions">
                  <button class="project-menu-action-btn"
                          onclick="event.stopPropagation();openRenameProjectModal('${p.id}','${p.name}')"
                          title="Rename workspace">
@@ -251,16 +262,14 @@ function renderProjectSwitcher(): void {
                      <path d="M8.5 1.5a1.414 1.414 0 012 2L3.5 10.5l-3 .5.5-3z"/>
                    </svg>
                  </button>
-                 <button class="project-menu-action-btn project-menu-action-delete"
+                 ${p.id !== 'default' ? `<button class="project-menu-action-btn project-menu-action-delete"
                          onclick="event.stopPropagation();deleteProjectConfirm('${p.id}','${p.name}')"
                          title="Delete workspace">
                    <svg viewBox="0 0 10 10" fill="none" width="9" height="9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
                      <line x1="1" y1="1" x2="9" y2="9"/><line x1="9" y1="1" x2="1" y2="9"/>
                    </svg>
-                 </button>
-               </span>`
-            : '<span class="project-menu-spacer"></span>'
-          }
+                 </button>` : ''}
+               </span>
         </div>`;
       }).join('')}
       <div class="project-menu-divider"></div>

@@ -55,6 +55,21 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', version: '1.0.0', app: 'yoinko', cloud: CLOUD_ENABLED });
 });
 
+// ── User info (cloud mode) ────────────────────────────────────────────────────
+app.get('/api/me', (req, res) => {
+  const user = (req as any).user;
+  if (!user) {
+    res.json({ user: null });
+    return;
+  }
+  res.json({
+    user: {
+      email: user.email || null,
+      tenantId: user.tenantId || null,
+    },
+  });
+});
+
 // ── SPA fallback ──────────────────────────────────────────────────────────────
 app.get('*', (_req, res) => {
   res.sendFile(path.join(publicDir, 'index.html'));

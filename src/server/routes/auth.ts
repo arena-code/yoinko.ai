@@ -84,7 +84,7 @@ router.get('/logout', (req, res) => {
     }
   }
 
-  res.redirect('/auth/login');
+  res.redirect('/auth/login?signed_out=1');
 });
 
 // ── Login page HTML ──────────────────────────────────────────────────────────
@@ -283,9 +283,17 @@ function loginPage(): string {
     const loadingEl = document.getElementById('loading');
     const submitBtn = document.getElementById('submitBtn');
 
-    // Check existing session
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session?.access_token) await setTokenAndRedirect(session.access_token);
+    // If we arrived here from a sign-out, destroy the Supabase client session first
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('signed_out')) {
+      await supabase.auth.signOut();
+      // Clean URL without reload
+      window.history.replaceState({}, '', '/auth/login');
+    } else {
+      // Check existing session (skip if we just signed out)
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) await setTokenAndRedirect(session.access_token);
+    }
 
     // Email + password
     document.getElementById('emailForm').addEventListener('submit', async () => {
@@ -344,39 +352,265 @@ function callbackPage(): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>yoinko — authenticating…</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
     body {
-      font-family: 'Fredoka', sans-serif; background: #1a1a2e;
-      min-height: 100vh; display: flex; align-items: center; justify-content: center;
-      color: rgba(255,255,255,0.5); font-size: 14px;
+      font-family: 'Fredoka', sans-serif;
+      background: #0f0f1a;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      position: relative;
     }
-    .cb-wrap { text-align: center; }
-    .cb-logo {
-      width: 100px; margin-bottom: 24px; opacity: 0.7;
-      filter: brightness(0) invert(1);
+
+    /* ── Background ── */
+    .bg-mesh {
+      position: fixed; inset: 0;
+      background:
+        radial-gradient(ellipse 80% 60% at 15% 30%, rgba(255,90,54,.12) 0%, transparent 70%),
+        radial-gradient(ellipse 60% 80% at 85% 70%, rgba(255,160,100,.08) 0%, transparent 70%),
+        radial-gradient(ellipse 50% 50% at 50% 50%, rgba(100,80,200,.05) 0%, transparent 70%);
+      animation: mesh 12s ease-in-out infinite alternate;
     }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .spinner {
-      display: inline-block; width: 20px; height: 20px;
-      border: 2px solid rgba(255,255,255,0.1); border-top-color: #FF5A36;
-      border-radius: 50%; animation: spin 0.7s linear infinite; margin-bottom: 16px;
+    @keyframes mesh {
+      0% { filter: hue-rotate(0deg); opacity: .8; }
+      100% { filter: hue-rotate(10deg); opacity: 1; }
     }
-    .cb-error { color: #fca5a5; margin-top: 12px; display: none; }
+
+    .orb {
+      position: fixed; border-radius: 50%;
+      filter: blur(80px); opacity: .35;
+      animation: orbF 8s ease-in-out infinite alternate;
+    }
+    .o1 { width:300px;height:300px;background:rgba(255,90,54,.15);top:-100px;left:-80px;animation-duration:10s }
+    .o2 { width:200px;height:200px;background:rgba(255,160,100,.1);bottom:-60px;right:-40px;animation-delay:3s;animation-duration:8s }
+    @keyframes orbF {
+      0% { transform: translate(0,0) scale(1); }
+      100% { transform: translate(30px,-20px) scale(1.1); }
+    }
+
+    .noise {
+      position: fixed; inset: 0; opacity: .03;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+      pointer-events: none;
+    }
+
+    /* ── Content ── */
+    .wrap {
+      position: relative; z-index: 10;
+      text-align: center; max-width: 400px; width: 90%;
+      animation: wrapIn .5s ease-out;
+    }
+    @keyframes wrapIn {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── Mascot dancing ── */
+    .mascot-stage {
+      position: relative;
+      width: 160px; height: 160px;
+      margin: 0 auto 32px;
+    }
+
+    .mascot-glow {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 120px; height: 120px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(255,90,54,.15) 0%, transparent 70%);
+      animation: glowPulse 2s ease-in-out infinite;
+    }
+    @keyframes glowPulse {
+      0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: .5; }
+      50% { transform: translate(-50%, -50%) scale(1.5); opacity: 1; }
+    }
+
+    .mascot-img {
+      width: 130px; height: 130px;
+      object-fit: contain;
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -55%);
+      z-index: 2;
+      animation: dance 1.4s ease-in-out infinite;
+      filter: drop-shadow(0 8px 20px rgba(255,90,54,.12));
+    }
+    @keyframes dance {
+      0%, 100% { transform: translate(-50%, -55%) rotate(0deg) scaleX(1); }
+      12% { transform: translate(-50%, -68%) rotate(-5deg) scaleX(1); }
+      24% { transform: translate(-50%, -55%) rotate(0deg) scaleX(1); }
+      36% { transform: translate(-50%, -64%) rotate(4deg) scaleX(-1); }
+      48% { transform: translate(-50%, -55%) rotate(0deg) scaleX(-1); }
+      60% { transform: translate(-50%, -60%) rotate(-3deg) scaleX(1); }
+      72% { transform: translate(-50%, -55%) rotate(0deg) scaleX(1); }
+      84% { transform: translate(-50%, -58%) rotate(2deg) scaleX(-1); }
+    }
+
+    /* Shadow under mascot */
+    .mascot-shadow {
+      position: absolute;
+      bottom: 8px; left: 50%;
+      transform: translateX(-50%);
+      width: 60px; height: 10px;
+      background: rgba(0,0,0,.3);
+      border-radius: 50%;
+      filter: blur(5px);
+      animation: shadowDance 1.4s ease-in-out infinite;
+    }
+    @keyframes shadowDance {
+      0%, 100% { transform: translateX(-50%) scaleX(1); opacity: .3; }
+      12% { transform: translateX(-50%) scaleX(.65); opacity: .15; }
+      24% { transform: translateX(-50%) scaleX(1); opacity: .3; }
+      36% { transform: translateX(-50%) scaleX(.72); opacity: .18; }
+      48% { transform: translateX(-50%) scaleX(1); opacity: .3; }
+      60% { transform: translateX(-50%) scaleX(.8); opacity: .22; }
+    }
+
+    /* Sparkles around mascot */
+    .sparkle {
+      position: absolute; width: 5px; height: 5px;
+      border-radius: 50%;
+      background: #FF5A36;
+      animation: sparkle 2s ease-in-out infinite;
+    }
+    .s1 { top: 15%; left: 10%; animation-delay: 0s; }
+    .s2 { top: 10%; right: 15%; animation-delay: .4s; }
+    .s3 { top: 45%; left: 5%; animation-delay: .8s; }
+    .s4 { top: 35%; right: 8%; animation-delay: 1.2s; }
+    .s5 { top: 65%; left: 18%; animation-delay: .6s; }
+    .s6 { top: 60%; right: 20%; animation-delay: 1s; }
+    @keyframes sparkle {
+      0%, 100% { opacity: 0; transform: scale(0); }
+      50% { opacity: .6; transform: scale(1); }
+    }
+
+    /* ── Status ── */
+    .status {
+      font-size: 18px; font-weight: 600;
+      color: rgba(255,255,255,.85);
+      margin-bottom: 6px;
+      letter-spacing: -.02em;
+    }
+
+    .sub-text {
+      font-size: 13px;
+      color: rgba(255,255,255,.3);
+      margin-bottom: 4px;
+    }
+
+    /* Progress bar */
+    .progress-track {
+      width: 160px; height: 4px;
+      background: rgba(255,255,255,.06);
+      border-radius: 4px;
+      margin: 20px auto 0;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%; width: 30%;
+      background: linear-gradient(90deg, #FF5A36, #ff8a65);
+      border-radius: 4px;
+      animation: progressSweep 2s ease-in-out infinite;
+    }
+    @keyframes progressSweep {
+      0% { width: 10%; margin-left: 0; }
+      50% { width: 50%; margin-left: 25%; }
+      100% { width: 10%; margin-left: 90%; }
+    }
+
+    .foot {
+      margin-top: 28px; font-size: 11px;
+      color: rgba(255,255,255,.12);
+    }
+    .foot a { color: rgba(255,255,255,.2); text-decoration: none; }
+    .foot a:hover { color: rgba(255,255,255,.4); }
+
+    /* ── Error state ── */
+    .cb-error {
+      display: none;
+      margin-top: 24px;
+      animation: wrapIn .3s ease-out;
+    }
     .cb-error.visible { display: block; }
-    .cb-error a { color: #FF5A36; text-decoration: none; margin-top: 8px; display: inline-block; }
+
+    .error-card {
+      background: rgba(255,100,100,.06);
+      border: 1px solid rgba(255,100,100,.12);
+      border-radius: 18px;
+      padding: 24px 28px;
+    }
+    .error-card p {
+      color: rgba(255,180,180,.9);
+      font-size: 14px; margin-bottom: 16px; line-height: 1.6;
+    }
+    .error-card a {
+      display: inline-flex; align-items: center; gap: 6px;
+      color: #FF5A36; text-decoration: none;
+      font-size: 14px; font-weight: 500;
+      padding: 8px 16px; border-radius: 10px;
+      border: 1px solid rgba(255,90,54,.2);
+      transition: all .2s;
+    }
+    .error-card a:hover {
+      background: rgba(255,90,54,.08);
+      border-color: rgba(255,90,54,.3);
+    }
+    .error-card a svg { width: 14px; height: 14px; }
+
+    /* Success state */
+    .mascot-img.success {
+      animation: successBounce .5s ease-out forwards;
+    }
+    @keyframes successBounce {
+      0% { transform: translate(-50%, -55%) scale(1); }
+      50% { transform: translate(-50%, -70%) scale(1.1); }
+      100% { transform: translate(-50%, -55%) scale(1); }
+    }
   </style>
 </head>
 <body>
-  <div class="cb-wrap">
-    <img src="/yoinko-logo.svg" alt="yoinko" class="cb-logo" onerror="this.style.display='none'">
-    <div class="spinner"></div>
-    <p id="status">authenticating…</p>
-    <div id="error" class="cb-error">
-      <p id="error-msg"></p>
-      <a href="/auth/login">&larr; try again</a>
+  <div class="bg-mesh"></div>
+  <div class="orb o1"></div>
+  <div class="orb o2"></div>
+  <div class="noise"></div>
+
+  <div class="wrap">
+    <div class="mascot-stage" id="mascot-stage">
+      <div class="mascot-glow"></div>
+      <span class="sparkle s1"></span>
+      <span class="sparkle s2"></span>
+      <span class="sparkle s3"></span>
+      <span class="sparkle s4"></span>
+      <span class="sparkle s5"></span>
+      <span class="sparkle s6"></span>
+      <img src="/mascot.png" alt="yoinko" class="mascot-img" id="mascot" onerror="this.src='/yoinko-logo.svg';this.style.width='80px';this.style.height='80px'">
+      <div class="mascot-shadow"></div>
     </div>
+
+    <p class="status" id="status">authenticating…</p>
+    <p class="sub-text" id="sub-text">hang tight, we're signing you in</p>
+    <div class="progress-track" id="progress">
+      <div class="progress-fill"></div>
+    </div>
+
+    <div id="error" class="cb-error">
+      <div class="error-card">
+        <p id="error-msg"></p>
+        <a href="/auth/login">
+          <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z" clip-rule="evenodd"/></svg>
+          try again
+        </a>
+      </div>
+    </div>
+
+    <div class="foot"><a href="https://yoinko.ai">yoinko.ai</a></div>
   </div>
 
   <script type="module">
@@ -384,6 +618,7 @@ function callbackPage(): string {
 
     const supabase = createClient('${SUPABASE_URL}', '${SUPABASE_ANON_KEY}');
     const statusEl = document.getElementById('status');
+    const subEl = document.getElementById('sub-text');
     let handled = false;
 
     // Handle PKCE code exchange (query param ?code=...)
@@ -392,6 +627,7 @@ function callbackPage(): string {
 
     if (code) {
       statusEl.textContent = 'exchanging code…';
+      subEl.textContent = 'verifying your identity';
       try {
         const { data, error } = await supabase.auth.exchangeCodeForSession(code);
         if (error) throw error;
@@ -405,7 +641,6 @@ function callbackPage(): string {
     }
 
     // Handle implicit flow (hash fragment #access_token=...)
-    // onAuthStateChange fires when the client auto-detects hash tokens
     if (!handled) {
       const timeout = setTimeout(() => {
         if (!handled) showError('Authentication timed out. Please try again.');
@@ -422,7 +657,8 @@ function callbackPage(): string {
     }
 
     async function storeAndRedirect(token) {
-      statusEl.textContent = 'signing you in…';
+      statusEl.textContent = 'almost there…';
+      subEl.textContent = 'setting up your workspace';
       const res = await fetch('/auth/set-token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -432,12 +668,23 @@ function callbackPage(): string {
         showError('Failed to store session');
         return;
       }
-      window.location.href = '/';
+      // Show success state
+      statusEl.textContent = 'welcome back! \\u2728';
+      subEl.textContent = '';
+      document.getElementById('progress').style.display = 'none';
+      const mascot = document.getElementById('mascot');
+      mascot.style.animation = 'none';
+      void mascot.offsetWidth; // force reflow
+      mascot.classList.add('success');
+      setTimeout(() => { window.location.href = '/'; }, 600);
     }
 
     function showError(msg) {
-      document.querySelector('.spinner').style.display = 'none';
-      statusEl.style.display = 'none';
+      document.getElementById('mascot-stage').style.display = 'none';
+      document.getElementById('progress').style.display = 'none';
+      subEl.style.display = 'none';
+      statusEl.textContent = 'oops!';
+      statusEl.style.color = 'rgba(255,150,150,.9)';
       document.getElementById('error').className = 'cb-error visible';
       document.getElementById('error-msg').textContent = msg;
     }
