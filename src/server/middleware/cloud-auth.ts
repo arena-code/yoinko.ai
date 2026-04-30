@@ -247,7 +247,7 @@ export function cloudAuth(req: Request, res: Response, next: NextFunction): void
       res.status(401).json({ error: 'Authentication required' });
       return;
     }
-    sendAuthBlockPage(res, 'sign in required', 'you need to sign in to access your yoinko cloud instance.', 'sign in', 'https://yoinko.ai/login');
+    sendAuthBlockPage(res, 'sign in required', 'you need to sign in to access your yoinko cloud instance.', 'sign in', '/auth/login');
     return;
   }
 
@@ -295,7 +295,7 @@ export function cloudAuth(req: Request, res: Response, next: NextFunction): void
         return;
       }
       res.clearCookie('yoinko_token');
-      sendAuthBlockPage(res, 'session expired', 'your session has expired. please sign in again to continue.', 'sign in again', 'https://yoinko.ai/login');
+      sendAuthBlockPage(res, 'session expired', 'your session has expired. please sign in again to continue.', 'sign in again', '/auth/login');
       return;
     }
 
@@ -305,7 +305,7 @@ export function cloudAuth(req: Request, res: Response, next: NextFunction): void
       res.status(403).json({ error: 'Invalid token' });
       return;
     }
-    sendAuthBlockPage(res, 'authentication failed', 'your authentication token is invalid. please sign in again.', 'sign in again', 'https://yoinko.ai/login');
+    sendAuthBlockPage(res, 'authentication failed', 'your authentication token is invalid. please sign in again.', 'sign in again', '/auth/login');
   }
 }
 
@@ -397,7 +397,7 @@ function sendAuthBlockPage(res: Response, title: string, message: string, button
 
     .auth-block-card h1 {
       font-size: 22px;
-      font-weight: 700;
+      font-weight: 500;
       color: rgba(255, 255, 255, 0.9);
       margin-bottom: 10px;
       letter-spacing: -0.02em;

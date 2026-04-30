@@ -5,7 +5,7 @@
   "description": "yoınko.ai — fewer buttons. more yoınking.",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "concurrently --names \"server,watch\" --prefix-colors \"cyan,magenta\" \"tsx watch src/server/index.ts\" \"node scripts/watch-client.js\"",
+    "dev": "concurrently --names \"server,watch\" --prefix-colors \"cyan,magenta\" \"tsx watch --env-file=.env src/server/index.ts\" \"node scripts/watch-client.js\"",
     "start": "node dist/index.js",
     "build": "npm run build:server && npm run build:client && npm run build:editor",
     "build:server": "tsc -p tsconfig.server.json",
