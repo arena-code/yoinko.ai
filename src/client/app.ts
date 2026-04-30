@@ -1044,7 +1044,7 @@ function renderUploadZone(pageId: string): string {
       <div class="upload-zone" id="upload-zone-${pageId}" onclick="triggerUpload('${pageId}')">
         <div class="upload-zone-icon">📎</div>
         <div class="upload-zone-text">Drop files here or click to upload</div>
-        <div class="upload-zone-hint">Images, PDFs, videos — up to 50 MB</div>
+        <div class="upload-zone-hint">.md and .html files become pages · other files attached as assets</div>
       </div>
       <input type="file" id="upload-input-${pageId}" multiple style="display:none" onchange="handleFileUpload(event,'${pageId}')">
     </div>
@@ -1073,17 +1073,60 @@ function handleFileUpload(e: Event, pageId: string): void {
 
 async function uploadFiles(files: FileList, pageId: string): Promise<void> {
   if (!files.length) return;
-  showToast(`Uploading ${files.length} file(s)…`);
-  const form = new FormData();
-  for (const f of Array.from(files)) form.append('files', f);
-  form.append('page_id', pageId);
-  try {
-    await api.uploadFiles(form);
-    showToast('Uploaded!');
-    await renderPage(pageId);
-  } catch (err) {
-    showToast('Upload failed: ' + (err as Error).message, 'error');
+
+  const allFiles = Array.from(files);
+
+  // Separate document files (.md, .html) from regular assets
+  const docFiles = allFiles.filter(f =>
+    f.name.endsWith('.md') || f.name.endsWith('.html') || f.name.endsWith('.htm')
+  );
+  const assetFiles = allFiles.filter(f =>
+    !f.name.endsWith('.md') && !f.name.endsWith('.html') && !f.name.endsWith('.htm')
+  );
+
+  // Determine parent folder — if we're viewing a folder, import into it
+  const currentPage = state.pages.find(p => p.id === pageId);
+  const parentId = currentPage?.type === 'folder' ? pageId : (currentPage?.parent_id || null);
+
+  // Import document files as pages
+  if (docFiles.length) {
+    showToast(`Importing ${docFiles.length} document(s)…`);
+    for (const f of docFiles) {
+      try {
+        const content = await f.text();
+        const baseName = f.name.replace(/\.(md|html|htm)$/i, '');
+        const fileType: 'md' | 'html' = f.name.endsWith('.md') ? 'md' : 'html';
+
+        await api.createPage({
+          name: baseName,
+          type: 'page',
+          file_type: fileType,
+          parent_id: parentId,
+          content,
+        });
+      } catch (err) {
+        showToast(`Failed to import ${f.name}: ${(err as Error).message}`, 'error');
+      }
+    }
+    await loadPages();
+    showToast(`Imported ${docFiles.length} page(s)`);
   }
+
+  // Upload remaining files as assets
+  if (assetFiles.length) {
+    showToast(`Uploading ${assetFiles.length} file(s)…`);
+    const form = new FormData();
+    for (const f of assetFiles) form.append('files', f);
+    form.append('page_id', pageId);
+    try {
+      await api.uploadFiles(form);
+      showToast('Uploaded!');
+    } catch (err) {
+      showToast('Upload failed: ' + (err as Error).message, 'error');
+    }
+  }
+
+  await renderPage(pageId);
 }
 
 let _confirmDeleteResolve: ((v: boolean) => void) | null = null;

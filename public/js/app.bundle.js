@@ -947,7 +947,7 @@ ${code}
       <div class="upload-zone" id="upload-zone-${pageId}" onclick="triggerUpload('${pageId}')">
         <div class="upload-zone-icon">\u{1F4CE}</div>
         <div class="upload-zone-text">Drop files here or click to upload</div>
-        <div class="upload-zone-hint">Images, PDFs, videos \u2014 up to 50 MB</div>
+        <div class="upload-zone-hint">.md and .html files become pages \xB7 other files attached as assets</div>
       </div>
       <input type="file" id="upload-input-${pageId}" multiple style="display:none" onchange="handleFileUpload(event,'${pageId}')">
     </div>
@@ -975,17 +975,49 @@ ${code}
   }
   async function uploadFiles(files, pageId) {
     if (!files.length) return;
-    showToast(`Uploading ${files.length} file(s)\u2026`);
-    const form = new FormData();
-    for (const f of Array.from(files)) form.append("files", f);
-    form.append("page_id", pageId);
-    try {
-      await api.uploadFiles(form);
-      showToast("Uploaded!");
-      await renderPage(pageId);
-    } catch (err) {
-      showToast("Upload failed: " + err.message, "error");
+    const allFiles = Array.from(files);
+    const docFiles = allFiles.filter(
+      (f) => f.name.endsWith(".md") || f.name.endsWith(".html") || f.name.endsWith(".htm")
+    );
+    const assetFiles = allFiles.filter(
+      (f) => !f.name.endsWith(".md") && !f.name.endsWith(".html") && !f.name.endsWith(".htm")
+    );
+    const currentPage = state.pages.find((p) => p.id === pageId);
+    const parentId = currentPage?.type === "folder" ? pageId : currentPage?.parent_id || null;
+    if (docFiles.length) {
+      showToast(`Importing ${docFiles.length} document(s)\u2026`);
+      for (const f of docFiles) {
+        try {
+          const content = await f.text();
+          const baseName = f.name.replace(/\.(md|html|htm)$/i, "");
+          const fileType = f.name.endsWith(".md") ? "md" : "html";
+          await api.createPage({
+            name: baseName,
+            type: "page",
+            file_type: fileType,
+            parent_id: parentId,
+            content
+          });
+        } catch (err) {
+          showToast(`Failed to import ${f.name}: ${err.message}`, "error");
+        }
+      }
+      await loadPages();
+      showToast(`Imported ${docFiles.length} page(s)`);
     }
+    if (assetFiles.length) {
+      showToast(`Uploading ${assetFiles.length} file(s)\u2026`);
+      const form = new FormData();
+      for (const f of assetFiles) form.append("files", f);
+      form.append("page_id", pageId);
+      try {
+        await api.uploadFiles(form);
+        showToast("Uploaded!");
+      } catch (err) {
+        showToast("Upload failed: " + err.message, "error");
+      }
+    }
+    await renderPage(pageId);
   }
   var _confirmDeleteResolve = null;
   function showConfirmDelete(filename, title = "Delete asset?") {
