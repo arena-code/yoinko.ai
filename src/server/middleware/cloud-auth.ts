@@ -243,14 +243,11 @@ export function cloudAuth(req: Request, res: Response, next: NextFunction): void
   const token = extractToken(req);
 
   if (!token) {
-    // For API routes, return 401
     if (req.path.startsWith('/api/')) {
       res.status(401).json({ error: 'Authentication required' });
       return;
     }
-    // For page requests, redirect to login
-    const redirect = encodeURIComponent(`https://${req.hostname}`);
-    res.redirect(`https://yoinko.ai/login?redirect=${redirect}`);
+    sendAuthBlockPage(res, 'sign in required', 'you need to sign in to access your yoinko cloud instance.', 'sign in', 'https://yoinko.ai/login');
     return;
   }
 
@@ -270,7 +267,7 @@ export function cloudAuth(req: Request, res: Response, next: NextFunction): void
           res.status(403).json({ error: 'No active subscription' });
           return;
         }
-        res.redirect('https://yoinko.ai/dashboard');
+        sendAuthBlockPage(res, 'no active subscription', 'you need an active yoinko cloud subscription to use this app.', 'go to dashboard', 'https://yoinko.ai/dashboard');
         return;
       }
 
@@ -297,19 +294,184 @@ export function cloudAuth(req: Request, res: Response, next: NextFunction): void
         res.status(401).json({ error: 'Token expired' });
         return;
       }
-      const redirect = encodeURIComponent(`https://${req.hostname}`);
-      res.redirect(`https://yoinko.ai/login?redirect=${redirect}`);
+      res.clearCookie('yoinko_token');
+      sendAuthBlockPage(res, 'session expired', 'your session has expired. please sign in again to continue.', 'sign in again', 'https://yoinko.ai/login');
       return;
     }
 
     console.error('[cloud-auth] JWT verify failed:', err.name, err.message);
-    // Clear bad cookie so user can re-authenticate
     res.clearCookie('yoinko_token');
     if (req.path.startsWith('/api/')) {
       res.status(403).json({ error: 'Invalid token' });
       return;
     }
-    const redirect = encodeURIComponent(`https://${req.hostname}`);
-    res.redirect(`https://yoinko.ai/login?redirect=${redirect}`);
+    sendAuthBlockPage(res, 'authentication failed', 'your authentication token is invalid. please sign in again.', 'sign in again', 'https://yoinko.ai/login');
   }
 }
+
+// ── Blocking auth page ────────────────────────────────────────────────────────
+function sendAuthBlockPage(res: Response, title: string, message: string, buttonLabel: string, buttonUrl: string) {
+  res.status(401).send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>yoinko — ${title}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Fredoka', sans-serif;
+      background: #1a1a2e;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    /* Animated background */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse at 20% 50%, rgba(255, 90, 54, 0.08) 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 50%, rgba(255, 138, 101, 0.06) 0%, transparent 50%);
+      animation: bgPulse 6s ease-in-out infinite alternate;
+    }
+
+    @keyframes bgPulse {
+      0% { opacity: 0.6; }
+      100% { opacity: 1; }
+    }
+
+    .auth-block {
+      position: relative;
+      z-index: 10;
+      text-align: center;
+      max-width: 420px;
+      width: 90%;
+    }
+
+    .auth-block-logo {
+      width: 140px;
+      margin-bottom: 32px;
+      opacity: 0.9;
+      filter: brightness(0) invert(1);
+    }
+
+    .auth-block-card {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-radius: 24px;
+      padding: 48px 36px 40px;
+      animation: slideUp 0.5s ease-out;
+    }
+
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .auth-block-icon {
+      width: 56px;
+      height: 56px;
+      border-radius: 16px;
+      background: rgba(255, 90, 54, 0.12);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 24px;
+    }
+
+    .auth-block-icon svg {
+      width: 28px;
+      height: 28px;
+      stroke: #FF5A36;
+    }
+
+    .auth-block-card h1 {
+      font-size: 22px;
+      font-weight: 700;
+      color: rgba(255, 255, 255, 0.9);
+      margin-bottom: 10px;
+      letter-spacing: -0.02em;
+    }
+
+    .auth-block-card p {
+      font-size: 14px;
+      color: rgba(255, 255, 255, 0.4);
+      line-height: 1.65;
+      margin-bottom: 28px;
+    }
+
+    .auth-block-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-family: 'Fredoka', sans-serif;
+      font-size: 15px;
+      font-weight: 600;
+      color: white;
+      background: linear-gradient(135deg, #FF5A36, #ff8a65);
+      border: none;
+      border-radius: 14px;
+      padding: 14px 32px;
+      cursor: pointer;
+      text-decoration: none;
+      transition: transform 0.15s, box-shadow 0.15s;
+      box-shadow: 0 4px 20px rgba(255, 90, 54, 0.3);
+    }
+
+    .auth-block-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 28px rgba(255, 90, 54, 0.4);
+    }
+
+    .auth-block-btn:active {
+      transform: translateY(0);
+    }
+
+    .auth-block-footer {
+      margin-top: 20px;
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.2);
+    }
+
+    .auth-block-footer a {
+      color: rgba(255, 255, 255, 0.35);
+      text-decoration: none;
+    }
+
+    .auth-block-footer a:hover {
+      color: rgba(255, 255, 255, 0.55);
+    }
+  </style>
+</head>
+<body>
+  <div class="auth-block">
+    <img src="/yoinko-logo.svg" alt="yoinko" class="auth-block-logo" onerror="this.style.display='none'">
+    <div class="auth-block-card">
+      <div class="auth-block-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+          <path d="M7 11V7a5 5 0 0110 0v4" />
+        </svg>
+      </div>
+      <h1>${title}</h1>
+      <p>${message}</p>
+      <a href="${buttonUrl}" class="auth-block-btn">${buttonLabel} →</a>
+      <div class="auth-block-footer">
+        <a href="https://yoinko.ai">yoinko.ai</a>
+      </div>
+    </div>
+  </div>
+</body>
+</html>`);
+}
+
