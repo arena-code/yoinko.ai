@@ -1450,10 +1450,10 @@ body {
 /* Chat toggle FAB */
 .chat-toggle {
   position: fixed;
-  bottom: 60px;
-  right: 60px;
-  width: 70px;
-  height: 70px;
+  bottom: 70px;
+  right: 70px;
+  width: 90px;
+  height: 90px;
   background: transparent;
   border: none;
   cursor: pointer;
@@ -1473,8 +1473,8 @@ body {
   transform: translate(1px, 1px) scale(0.96);
 }
 .chat-toggle-mascot {
-  width: 70px;
-  height: 70px;
+  width: 90px;
+  height: 90px;
   object-fit: contain;
   pointer-events: none;
   filter: drop-shadow(3px 3px 0 var(--ink));
@@ -1492,7 +1492,7 @@ body {
 
 /* Tooltip */
 .chat-toggle::before {
-  content: "Ask Yoinko ✨";
+  content: "Ask Yoinko";
   position: absolute;
   right: calc(100% + 12px);
   top: 50%;
