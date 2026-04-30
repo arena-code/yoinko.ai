@@ -14,7 +14,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import fs from 'fs';
-import jwt from 'jsonwebtoken';
+import { jwtVerify, createRemoteJWKSet } from 'jose';
 import { CLOUD_DATA_ROOT } from '../tenant-context.js';
 
 interface SupabaseJwtPayload {
@@ -33,9 +33,13 @@ interface TenantInfo {
 }
 
 const CLOUD_ENABLED = process.env.YOINKO_CLOUD === 'true';
-const JWT_SECRET = process.env.SUPABASE_JWT_SECRET || '';
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+
+// JWKS for verifying Supabase ES256 JWTs (auto-caches keys)
+const JWKS = SUPABASE_URL
+  ? createRemoteJWKSet(new URL(`${SUPABASE_URL}/.well-known/jwks.json`))
+  : null;
 
 // ── Tenant cache (avoids Supabase REST call on every request) ─────────────────
 const tenantCache = new Map<string, { tenant: TenantInfo; expiresAt: number }>();
@@ -251,45 +255,45 @@ export function cloudAuth(req: Request, res: Response, next: NextFunction): void
     return;
   }
 
-  if (!JWT_SECRET) {
-    console.error('[cloud-auth] SUPABASE_JWT_SECRET not set');
+  if (!JWKS) {
+    console.error('[cloud-auth] NEXT_PUBLIC_SUPABASE_URL not set — cannot verify JWTs');
     res.status(500).json({ error: 'Server misconfigured' });
     return;
   }
 
-  try {
-    const payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as SupabaseJwtPayload;
+  // Verify JWT using Supabase JWKS (handles ES256, RS256, HS256 automatically)
+  verifyAndContinue(token, req, res, next);
+}
 
-    // Look up tenant and set data dir
-    lookupTenant(payload.sub).then(tenant => {
-      if (!tenant) {
-        if (req.path.startsWith('/api/')) {
-          res.status(403).json({ error: 'No active subscription' });
-          return;
-        }
-        sendAuthBlockPage(res, 'no active subscription', 'you need an active yoinko cloud subscription to use this app.', 'go to dashboard', 'https://yoinko.ai/dashboard');
+async function verifyAndContinue(token: string, req: Request, res: Response, next: NextFunction) {
+  try {
+    const { payload } = await jwtVerify(token, JWKS!);
+    const sub = payload.sub as string;
+    const email = (payload as any).email as string | undefined;
+
+    // Look up tenant
+    const tenant = await lookupTenant(sub);
+    if (!tenant) {
+      if (req.path.startsWith('/api/')) {
+        res.status(403).json({ error: 'No active subscription' });
         return;
       }
+      sendAuthBlockPage(res, 'no active subscription', 'you need an active yoinko cloud subscription to use this app.', 'go to dashboard', 'https://yoinko.ai/dashboard');
+      return;
+    }
 
-      // Ensure tenant directory exists (lazy provisioning)
-      ensureTenantDir(tenant.dataDir);
+    // Ensure tenant directory exists (lazy provisioning)
+    ensureTenantDir(tenant.dataDir);
 
-      // Attach to request for downstream use
-      (req as any).user = {
-        id: payload.sub,
-        email: payload.email,
-        tenantId: tenant.subdomain,
-      };
-      (req as any).tenantDataDir = tenant.dataDir;
+    // Attach to request for downstream use
+    (req as any).user = { id: sub, email, tenantId: tenant.subdomain };
+    (req as any).tenantDataDir = tenant.dataDir;
 
-      next();
-    }).catch(err => {
-      console.error('[cloud-auth] Tenant lookup failed:', err);
-      res.status(500).json({ error: 'Internal error' });
-    });
-
+    next();
   } catch (err: any) {
-    if (err.name === 'TokenExpiredError') {
+    const code = err?.code;
+
+    if (code === 'ERR_JWT_EXPIRED') {
       if (req.path.startsWith('/api/')) {
         res.status(401).json({ error: 'Token expired' });
         return;
@@ -299,7 +303,7 @@ export function cloudAuth(req: Request, res: Response, next: NextFunction): void
       return;
     }
 
-    console.error('[cloud-auth] JWT verify failed:', err.name, err.message);
+    console.error('[cloud-auth] JWT verify failed:', err.code || err.name, err.message);
     res.clearCookie('yoinko_token');
     if (req.path.startsWith('/api/')) {
       res.status(403).json({ error: 'Invalid token' });
