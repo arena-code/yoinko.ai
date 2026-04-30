@@ -202,7 +202,7 @@ export function cloudAuth(req: Request, res: Response, next: NextFunction): void
   }
 
   try {
-    const payload = jwt.verify(token, JWT_SECRET) as SupabaseJwtPayload;
+    const payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as SupabaseJwtPayload;
 
     // Look up tenant and set data dir
     lookupTenant(payload.sub).then(tenant => {
@@ -244,6 +244,13 @@ export function cloudAuth(req: Request, res: Response, next: NextFunction): void
     }
 
     console.error('[cloud-auth] JWT verify failed:', err.name, err.message);
-    res.status(403).json({ error: 'Invalid token' });
+    // Clear bad cookie so user can re-authenticate
+    res.clearCookie('yoinko_token');
+    if (req.path.startsWith('/api/')) {
+      res.status(403).json({ error: 'Invalid token' });
+      return;
+    }
+    const redirect = encodeURIComponent(`https://${req.hostname}`);
+    res.redirect(`https://yoinko.ai/login?redirect=${redirect}`);
   }
 }

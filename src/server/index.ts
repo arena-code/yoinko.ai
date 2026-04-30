@@ -84,6 +84,26 @@ const server = app.listen(PORT, () => {
   console.log(`  ║   yoınko — Knowledge Base        ║`);
   console.log(`  ║   http://localhost:${PORT}          ║`);
   console.log(`  ╚══════════════════════════════════╝\n`);
+
+  // Cloud mode diagnostics
+  const isCloud = process.env.YOINKO_CLOUD === 'true';
+  if (isCloud) {
+    const vars = {
+      YOINKO_CLOUD: '✓',
+      SUPABASE_JWT_SECRET: process.env.SUPABASE_JWT_SECRET ? `✓ (${process.env.SUPABASE_JWT_SECRET.length} chars)` : '✗ MISSING',
+      NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL || '✗ MISSING',
+      SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY ? `✓ (${process.env.SUPABASE_SERVICE_ROLE_KEY.length} chars)` : '✗ MISSING',
+      YOINKO_DATA_DIR: process.env.YOINKO_DATA_DIR || '(default: ./data)',
+      NODE_ENV: process.env.NODE_ENV || 'development',
+    };
+    console.log('  ☁️  Cloud mode enabled:');
+    for (const [key, val] of Object.entries(vars)) {
+      console.log(`     ${key}: ${val}`);
+    }
+    console.log('');
+  } else {
+    console.log('  📦 Self-hosted mode\n');
+  }
 });
 
 // ── Graceful shutdown (prevents tsx "Force killing" warning) ──────────────────
