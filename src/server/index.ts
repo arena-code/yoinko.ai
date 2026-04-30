@@ -52,7 +52,7 @@ app.use('/api/projects', projectsRouter);
 
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', version: '1.0.0', app: 'yoinko' });
+  res.json({ status: 'ok', version: '1.0.0', app: 'yoinko', cloud: CLOUD_ENABLED });
 });
 
 // ── SPA fallback ──────────────────────────────────────────────────────────────

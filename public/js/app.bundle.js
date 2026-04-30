@@ -150,6 +150,13 @@ var NotasApp = (() => {
       const menu = document.getElementById("project-menu");
       if (menu) menu.classList.toggle("open");
     };
+    window.cloudLogout = async () => {
+      try {
+        await fetch("/auth/logout", { method: "POST" });
+      } catch {
+      }
+      window.location.href = "/auth/login";
+    };
     await loadSettings();
     applyTheme(state.theme);
     await loadProjects();
@@ -157,6 +164,15 @@ var NotasApp = (() => {
     setupEventListeners();
     handleHashRoute();
     window.addEventListener("hashchange", handleHashRoute);
+    try {
+      const healthRes = await fetch("/api/health");
+      const health = await healthRes.json();
+      if (health.cloud) {
+        const logoutBtn = document.getElementById("btn-logout");
+        if (logoutBtn) logoutBtn.style.display = "";
+      }
+    } catch {
+    }
   }
   async function loadProjects() {
     try {

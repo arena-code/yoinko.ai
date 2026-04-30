@@ -66,6 +66,7 @@ declare global {
     deleteProjectConfirm: (id: string, name: string) => void;
     closeConfirmDeleteProject: (result: boolean) => void;
     toggleProjectMenu: () => void;
+    cloudLogout: () => void;
   }
 
   // Marked declared as global from CDN script tag
@@ -161,6 +162,13 @@ async function init(): Promise<void> {
     if (menu) menu.classList.toggle('open');
   };
 
+  window.cloudLogout = async () => {
+    try {
+      await fetch('/auth/logout', { method: 'POST' });
+    } catch { /* ignore */ }
+    window.location.href = '/auth/login';
+  };
+
   await loadSettings();
   applyTheme(state.theme);
   await loadProjects();  // must happen before loadPages
@@ -168,6 +176,16 @@ async function init(): Promise<void> {
   setupEventListeners();
   handleHashRoute();
   window.addEventListener('hashchange', handleHashRoute);
+
+  // Cloud mode — show logout button
+  try {
+    const healthRes = await fetch('/api/health');
+    const health = await healthRes.json();
+    if (health.cloud) {
+      const logoutBtn = document.getElementById('btn-logout');
+      if (logoutBtn) logoutBtn.style.display = '';
+    }
+  } catch { /* ignore */ }
 }
 
 // ── Projects ──────────────────────────────────────────────────────────────────
