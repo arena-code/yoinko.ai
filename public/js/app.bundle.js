@@ -663,8 +663,13 @@ ${code}
         }).join("");
       }
       if (t === "listItem" || t === "taskItem") {
-        const content = c.map((n) => block(n, "")).join("").trimEnd();
-        return indent + content + "\n";
+        const parts = c.map((n) => {
+          if (n.type === "bulletList" || n.type === "orderedList" || n.type === "taskList") {
+            return block(n, "").replace(/^(.)/gm, "  $1");
+          }
+          return block(n, "").trimEnd();
+        });
+        return indent + parts.join("\n").trimEnd() + "\n";
       }
       if (t === "hardBreak") return "  \n";
       if (t === "text") return node.text || "";

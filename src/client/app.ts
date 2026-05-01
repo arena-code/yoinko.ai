@@ -748,8 +748,15 @@ function tiptapToMarkdown(doc: TipTapDoc): string {
       }).join('');
     }
     if (t === 'listItem' || t === 'taskItem') {
-      const content = c.map(n => block(n, '')).join('').trimEnd();
-      return indent + content + '\n';
+      // Serialize child blocks; nested lists need extra indentation
+      const parts = c.map(n => {
+        if (n.type === 'bulletList' || n.type === 'orderedList' || n.type === 'taskList') {
+          // Indent every line of the nested list by 2 spaces
+          return block(n, '').replace(/^(.)/gm, '  $1');
+        }
+        return block(n, '').trimEnd();
+      });
+      return indent + parts.join('\n').trimEnd() + '\n';
     }
     if (t === 'hardBreak') return '  \n';
     if (t === 'text') return node.text || '';
