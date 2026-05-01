@@ -66,6 +66,16 @@ export interface AIOptions {
   baseUrl?: string;
 }
 
+export interface LLMProfile {
+  id: string;
+  name: string;
+  provider: LLMProvider;
+  model: string;
+  api_key: string;
+  base_url: string;
+  image_model: string;
+}
+
 export interface ImageResult {
   url?: string;
   base64?: string;

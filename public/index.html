@@ -1,10 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>yoınko — AI-Powered Knowledge Base</title>
-  <meta name="description" content="yoınko is an open-source, AI-powered knowledge base for markdown and HTML documents — fewer buttons, more yoınking.">
+  <meta name="description"
+    content="yoınko is an open-source, AI-powered knowledge base for markdown and HTML documents — fewer buttons, more yoınking.">
 
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -22,446 +24,589 @@
 
   <link rel="stylesheet" href="/css/app.css">
 </head>
+
 <body>
 
-<div id="app">
+  <div id="app">
 
-  <!-- ══ SIDEBAR ══════════════════════════════════════════════════════════ -->
-  <aside class="sidebar" id="sidebar">
-    <div class="sidebar-header">
-      <div class="logo-mark">
-        <img src="/yoinko-logo.svg" alt="yoınko" class="yk-logo-img">
+    <!-- ══ SIDEBAR ══════════════════════════════════════════════════════════ -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="logo-mark">
+          <img src="/yoinko-logo.svg" alt="yoınko" class="yk-logo-img">
+        </div>
+        <!-- Project switcher -->
+        <div class="project-switcher" id="project-switcher"></div>
       </div>
-      <!-- Project switcher -->
-      <div class="project-switcher" id="project-switcher"></div>
-    </div>
 
-    <div class="sidebar-search">
-      <div class="search-input-wrap">
-        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/></svg>
-        <input type="text" id="sidebar-search" placeholder="Search pages..." autocomplete="off">
-      </div>
-      <button class="icon-btn" id="settings-btn" title="Settings" onclick="openSettings()">
-        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd"/></svg>
-      </button>
-    </div>
-
-    <nav class="sidebar-nav" id="sidebar-nav"></nav>
-
-    <div class="sidebar-footer">
-      <button class="btn-add primary" id="btn-new-page">
-        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V7.414A2 2 0 0015.414 6L12 2.586A2 2 0 0010.586 2H6zm5 6a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V8z" clip-rule="evenodd"/></svg>
-        New Page
-      </button>
-      <button class="btn-add" id="btn-new-folder">
-        <svg viewBox="0 0 20 20" fill="currentColor"><path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/></svg>
-        Folder
-      </button>
-    </div>
-    <div class="sidebar-user-row" id="sidebar-user-row" style="display:none">
-      <div class="sidebar-user-info">
-        <span class="sidebar-user-email" id="sidebar-user-email"></span>
-        <span class="sidebar-user-tenant" id="sidebar-user-tenant"></span>
-      </div>
-      <button class="btn-cloud-logout" id="btn-logout" onclick="cloudLogout()" title="Sign out">
-        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 3a1 1 0 00-1 1v12a1 1 0 102 0V4a1 1 0 00-1-1zm10.293 9.293a1 1 0 001.414 1.414l3-3a1 1 0 000-1.414l-3-3a1 1 0 10-1.414 1.414L14.586 9H7a1 1 0 100 2h7.586l-1.293 1.293z" clip-rule="evenodd"/></svg>
-      </button>
-    </div>
-
-
-  </aside>
-
-  <!-- ══ MAIN ═════════════════════════════════════════════════════════════ -->
-  <main class="main">
-
-    <!-- Topbar -->
-    <div class="topbar">
-      <div class="topbar-breadcrumb">
-        <span class="bc-parent" id="bc-parent">yoınko</span>
-        <span class="bc-sep">›</span>
-        <input type="text" class="page-title-input" id="page-title" placeholder="Untitled" autocomplete="off">
-      </div>
-      <div class="topbar-actions">
-        <span class="save-indicator hidden" id="save-indicator">
-          <svg viewBox="0 0 20 20" fill="currentColor" style="width:13px;height:13px"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
-          Saved
-        </span>
-        <span class="saving-indicator hidden" id="saving-indicator">
-          <svg viewBox="0 0 20 20" fill="currentColor" style="width:13px;height:13px;animation:spin 1s linear infinite"><path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"/></svg>
-          Saving…
-        </span>
-        <button class="btn btn-sm btn-ghost hidden" id="html-edit-btn" title="Toggle HTML editor" onclick="toggleHtmlEditMode()">
-          ✏️ Edit HTML
-        </button>
-        <span class="topbar-badge" id="topbar-badge"></span>
-      </div>
-    </div>
-
-    <!-- Content -->
-    <div class="content-area" id="content-area">
-      <!-- Rendered by app.js -->
-    </div>
-
-  </main>
-
-  <!-- ══ AI CHAT DRAWER ════════════════════════════════════════════════════ -->
-  <aside class="chat-drawer" id="chat-drawer">
-    <div class="chat-header">
-      <div>
-        <div class="chat-header-title">AI Assistant</div>
-        <div class="chat-header-sub">Ask anything about this page</div>
-      </div>
-      <button class="icon-btn" id="chat-close-btn" title="Close">
-        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
-      </button>
-    </div>
-
-    <div class="chat-messages" id="chat-messages">
-      <div style="text-align:center;padding:40px 16px;color:var(--text-dim);font-size:14px;">
-        <img src="/mascot.svg" alt="Yoinko" class="chat-empty-mascot">
-        <div>Ask me anything about this page,<br>or request changes!</div>
-      </div>
-    </div>
-
-    <div class="chat-footer">
-      <button class="chat-action-btn" onclick="clearChat()">🗑 Clear</button>
-      <button class="chat-action-btn" onclick="applyAiSuggestion()">✨ Apply to Page</button>
-    </div>
-
-    <div class="chat-input-area">
-      <div class="chat-input-wrap">
-        <textarea id="chat-input" rows="1" placeholder="Ask AI anything… (Enter to send)"></textarea>
-        <button class="chat-send-btn" id="chat-send-btn" onclick="sendChatMessage()" title="Send">
-          <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z"/></svg>
+      <div class="sidebar-search">
+        <div class="search-input-wrap">
+          <svg viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd"
+              d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z"
+              clip-rule="evenodd" />
+          </svg>
+          <input type="text" id="sidebar-search" placeholder="Search pages..." autocomplete="off">
+        </div>
+        <button class="icon-btn" id="settings-btn" title="Settings" onclick="openSettings()">
+          <svg viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd"
+              d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z"
+              clip-rule="evenodd" />
+          </svg>
         </button>
       </div>
-    </div>
-  </aside>
 
-</div><!-- #app -->
+      <nav class="sidebar-nav" id="sidebar-nav"></nav>
 
-<!-- ══ Floating buttons ═══════════════════════════════════════════════════ -->
-<button class="compose-btn hidden" id="compose-btn" title="Add section with AI" style="display:none">
-  <svg viewBox="0 0 20 20" fill="currentColor" style="width:20px;height:20px"><path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd"/></svg>
-</button>
-
-<button class="chat-toggle" id="chat-toggle">
-  <img src="/mascot.svg" alt="Yoinko" class="chat-toggle-mascot">
-</button>
-
-<!-- Compose popup -->
-<div class="compose-popup" id="compose-popup">
-  <div class="compose-popup-title">
-    ✨ Add section with AI
-  </div>
-  <textarea class="compose-popup-input" id="compose-input" placeholder="Describe what to add… e.g. 'Add a section about best practices'"></textarea>
-  <div class="compose-popup-actions">
-    <button class="btn btn-ghost btn-sm" onclick="$('compose-popup').classList.remove('open')">Cancel</button>
-    <button class="btn btn-primary btn-sm" id="compose-submit" onclick="submitCompose()">
-      ✨ Generate
-    </button>
-  </div>
-</div>
-
-<!-- ══ MODALS ══════════════════════════════════════════════════════════════ -->
-
-<!-- New Page/Folder Modal -->
-<div class="modal-overlay" id="new-page-overlay">
-  <div class="modal">
-    <div class="modal-title">
-      Create New
-      <button class="modal-close" onclick="closeNewPageModal()">
-        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
-      </button>
-    </div>
-
-    <div class="form-group">
-      <label class="form-label">Type</label>
-      <div class="type-selector">
-        <div class="type-option selected" data-type="page" onclick="selectType('page')">
-          <div class="type-option-icon">📝</div>
-          <div class="type-option-name">Page</div>
-          <div class="type-option-desc">MD or HTML</div>
+      <div class="sidebar-footer">
+        <button class="btn-add primary" id="btn-new-page">
+          <svg viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd"
+              d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V7.414A2 2 0 0015.414 6L12 2.586A2 2 0 0010.586 2H6zm5 6a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V8z"
+              clip-rule="evenodd" />
+          </svg>
+          New Page
+        </button>
+        <button class="btn-add" id="btn-new-folder">
+          <svg viewBox="0 0 20 20" fill="currentColor">
+            <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
+          </svg>
+          Folder
+        </button>
+      </div>
+      <div class="sidebar-user-row" id="sidebar-user-row" style="display:none">
+        <div class="sidebar-user-info">
+          <span class="sidebar-user-email" id="sidebar-user-email"></span>
+          <span class="sidebar-user-tenant" id="sidebar-user-tenant"></span>
         </div>
-        <div class="type-option" data-type="folder" onclick="selectType('folder')">
-          <div class="type-option-icon">📁</div>
-          <div class="type-option-name">Folder</div>
-          <div class="type-option-desc">Group pages</div>
+        <button class="btn-cloud-logout" id="btn-logout" onclick="cloudLogout()" title="Sign out">
+          <svg viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd"
+              d="M3 3a1 1 0 00-1 1v12a1 1 0 102 0V4a1 1 0 00-1-1zm10.293 9.293a1 1 0 001.414 1.414l3-3a1 1 0 000-1.414l-3-3a1 1 0 10-1.414 1.414L14.586 9H7a1 1 0 100 2h7.586l-1.293 1.293z"
+              clip-rule="evenodd" />
+          </svg>
+        </button>
+      </div>
+
+
+    </aside>
+
+    <!-- ══ MAIN ═════════════════════════════════════════════════════════════ -->
+    <main class="main">
+
+      <!-- Topbar -->
+      <div class="topbar">
+        <div class="topbar-breadcrumb">
+          <span class="bc-parent" id="bc-parent">yoınko</span>
+          <span class="bc-sep">›</span>
+          <input type="text" class="page-title-input" id="page-title" placeholder="Untitled" autocomplete="off">
         </div>
-        <div class="type-option" data-type="image" onclick="selectType('image')">
-          <div class="type-option-icon">🖼️</div>
-          <div class="type-option-name">AI Image</div>
-          <div class="type-option-desc">Generate art</div>
+        <div class="topbar-actions">
+          <span class="save-indicator hidden" id="save-indicator">
+            <svg viewBox="0 0 20 20" fill="currentColor" style="width:13px;height:13px">
+              <path fill-rule="evenodd"
+                d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                clip-rule="evenodd" />
+            </svg>
+            Saved
+          </span>
+          <span class="saving-indicator hidden" id="saving-indicator">
+            <svg viewBox="0 0 20 20" fill="currentColor"
+              style="width:13px;height:13px;animation:spin 1s linear infinite">
+              <path fill-rule="evenodd"
+                d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z"
+                clip-rule="evenodd" />
+            </svg>
+            Saving…
+          </span>
+          <button class="btn btn-sm btn-ghost hidden" id="html-edit-btn" title="Toggle HTML editor"
+            onclick="toggleHtmlEditMode()">
+            ✏️ Edit HTML
+          </button>
+          <span class="topbar-badge" id="topbar-badge"></span>
         </div>
       </div>
-      <input type="hidden" id="new-page-type" value="page">
-    </div>
 
-    <div class="form-group">
-      <label class="form-label" for="new-page-name">Name</label>
-      <input class="form-input" type="text" id="new-page-name" placeholder="Page or folder name…" autocomplete="off">
-    </div>
-
-    <div class="form-group" id="new-page-parent-row">
-      <label class="form-label" for="new-page-parent">Location</label>
-      <select class="form-select" id="new-page-parent">
-        <option value="">— Root level —</option>
-      </select>
-    </div>
-
-    <div class="form-group" id="new-page-file-type-row">
-      <label class="form-label" for="new-page-file-type">File Format</label>
-      <select class="form-select" id="new-page-file-type">
-        <option value="md">📝 Markdown (.md)</option>
-        <option value="html">🌐 HTML (.html)</option>
-      </select>
-    </div>
-
-    <!-- AI Fill toggle -->
-    <div class="ai-fill-toggle" id="new-page-ai-toggle" data-active="false" onclick="toggleAiFill()" style="display:none">
-      <div class="ai-fill-toggle-icon">✨</div>
-      <div>
-        <div class="ai-fill-toggle-text">Pre-fill with AI</div>
+      <!-- Content -->
+      <div class="content-area" id="content-area">
+        <!-- Rendered by app.js -->
       </div>
-      <div class="ai-fill-toggle-check" id="ai-fill-check"></div>
+
+    </main>
+
+    <!-- ══ AI CHAT DRAWER ════════════════════════════════════════════════════ -->
+    <aside class="chat-drawer" id="chat-drawer">
+      <div class="chat-header">
+        <div>
+          <div class="chat-header-title">AI Assistant</div>
+          <div class="chat-header-sub">Ask anything about this page</div>
+        </div>
+        <button class="icon-btn" id="chat-close-btn" title="Close">
+          <svg viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd"
+              d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+              clip-rule="evenodd" />
+          </svg>
+        </button>
+      </div>
+
+      <div class="chat-messages" id="chat-messages">
+        <div style="text-align:center;padding:40px 16px;color:var(--text-dim);font-size:14px;">
+          <img src="/mascot.svg" alt="Yoinko" class="chat-empty-mascot">
+          <div>Ask me anything about this page,<br>or request changes!</div>
+        </div>
+      </div>
+
+      <div class="chat-footer">
+        <button class="chat-action-btn" onclick="clearChat()">🗑 Clear</button>
+        <button class="chat-action-btn" onclick="applyAiSuggestion()">✨ Apply to Page</button>
+      </div>
+
+      <div class="chat-input-area">
+        <div class="chat-input-wrap">
+          <textarea id="chat-input" rows="1" placeholder="Ask AI anything… (Enter to send)"></textarea>
+          <button class="chat-send-btn" id="chat-send-btn" onclick="sendChatMessage()" title="Send">
+            <svg viewBox="0 0 20 20" fill="currentColor">
+              <path
+                d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+  </div><!-- #app -->
+
+  <!-- ══ Floating buttons ═══════════════════════════════════════════════════ -->
+  <button class="compose-btn hidden" id="compose-btn" title="Add section with AI" style="display:none">
+    <svg viewBox="0 0 20 20" fill="currentColor" style="width:20px;height:20px">
+      <path fill-rule="evenodd"
+        d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" />
+    </svg>
+  </button>
+
+  <button class="chat-toggle" id="chat-toggle">
+    <img src="/mascot.svg" alt="Yoinko" class="chat-toggle-mascot">
+  </button>
+
+  <!-- Compose popup -->
+  <div class="compose-popup" id="compose-popup">
+    <div class="compose-popup-title">
+      ✨ Add section with AI
     </div>
-    <div id="new-page-ai-prefill-row" style="display:flex;gap:8px;margin-top:10px;">
-      <button type="button" onclick="toggleAiFill()" style="background:transparent;border:1px dashed var(--border);border-radius:var(--radius-sm);padding:8px 14px;color:var(--text-dim);font-family:'Syne',sans-serif;font-size:13px;cursor:pointer;transition:all 0.13s;display:flex;align-items:center;gap:6px;width:100%;" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
-        ✨ Pre-fill with AI
+    <textarea class="compose-popup-input" id="compose-input"
+      placeholder="Describe what to add… e.g. 'Add a section about best practices'"></textarea>
+    <div class="compose-popup-actions">
+      <button class="btn btn-ghost btn-sm" onclick="$('compose-popup').classList.remove('open')">Cancel</button>
+      <button class="btn btn-primary btn-sm" id="compose-submit" onclick="submitCompose()">
+        ✨ Generate
       </button>
     </div>
+  </div>
 
-    <div id="new-page-ai-section" style="display:none;margin-top:14px;">
+  <!-- ══ MODALS ══════════════════════════════════════════════════════════════ -->
+
+  <!-- New Page/Folder Modal -->
+  <div class="modal-overlay" id="new-page-overlay">
+    <div class="modal">
+      <div class="modal-title">
+        Create New
+        <button class="modal-close" onclick="closeNewPageModal()">
+          <svg viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd"
+              d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+              clip-rule="evenodd" />
+          </svg>
+        </button>
+      </div>
+
       <div class="form-group">
-        <label class="form-label" id="ai-prompt-label" for="new-page-ai-prompt">Describe the content to generate:</label>
-        <textarea class="form-textarea" id="new-page-ai-prompt" placeholder="e.g. 'Write a guide on REST API design best practices'"></textarea>
+        <label class="form-label">Type</label>
+        <div class="type-selector">
+          <div class="type-option selected" data-type="page" onclick="selectType('page')">
+            <div class="type-option-icon">📝</div>
+            <div class="type-option-name">Page</div>
+            <div class="type-option-desc">MD or HTML</div>
+          </div>
+          <div class="type-option" data-type="folder" onclick="selectType('folder')">
+            <div class="type-option-icon">📁</div>
+            <div class="type-option-name">Folder</div>
+            <div class="type-option-desc">Group pages</div>
+          </div>
+          <div class="type-option" data-type="image" onclick="selectType('image')">
+            <div class="type-option-icon">🖼️</div>
+            <div class="type-option-name">AI Image</div>
+            <div class="type-option-desc">Generate art</div>
+          </div>
+        </div>
+        <input type="hidden" id="new-page-type" value="page">
       </div>
-    </div>
 
-    <!-- AI Image prompt section -->
-    <div id="new-page-image-section" style="display:none;margin-top:14px;">
       <div class="form-group">
-        <label class="form-label" for="new-page-image-prompt">Describe the image to generate:</label>
-        <textarea class="form-textarea" id="new-page-image-prompt" placeholder="e.g. 'A serene mountain lake at sunset, photorealistic'"></textarea>
+        <label class="form-label" for="new-page-name">Name</label>
+        <input class="form-input" type="text" id="new-page-name" placeholder="Page or folder name…" autocomplete="off">
       </div>
-    </div>
 
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeNewPageModal()">Cancel</button>
-      <button class="btn btn-primary" id="new-page-submit" onclick="submitNewPage()">
-        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd"/></svg>
-        Create
-      </button>
-    </div>
-  </div>
-</div>
+      <div class="form-group" id="new-page-parent-row">
+        <label class="form-label" for="new-page-parent">Location</label>
+        <select class="form-select" id="new-page-parent">
+          <option value="">— Root level —</option>
+        </select>
+      </div>
 
-<!-- Create Project Modal -->
-<div class="modal-overlay" id="create-project-overlay">
-  <div class="modal" style="width:360px">
-    <div class="modal-title">
-      ◈ New Project
-      <button class="modal-close" onclick="closeCreateProjectModal()">
-        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
-      </button>
-    </div>
-    <div class="modal-body">
-      <label class="form-label">Project name</label>
-      <input type="text" id="new-project-name" class="form-input" placeholder="e.g. Work, Personal…"
-             onkeydown="if(event.key==='Enter')submitCreateProject();if(event.key==='Escape')closeCreateProjectModal();">
-    </div>
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeCreateProjectModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="submitCreateProject()">Create</button>
-    </div>
-  </div>
-</div>
+      <div class="form-group" id="new-page-file-type-row">
+        <label class="form-label" for="new-page-file-type">File Format</label>
+        <select class="form-select" id="new-page-file-type">
+          <option value="md">📝 Markdown (.md)</option>
+          <option value="html">🌐 HTML (.html)</option>
+        </select>
+      </div>
 
-<div class="modal-overlay" id="rename-project-overlay">
-  <div class="modal" style="width:360px">
-    <div class="modal-title">
-      Rename workspace
-      <button class="modal-close" onclick="closeRenameProjectModal()">
-        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
-      </button>
-    </div>
-    <div class="modal-body">
-      <label class="form-label">Workspace name</label>
-      <input type="text" id="rename-project-input" class="form-input" placeholder="Enter new name…"
-             onkeydown="if(event.key==='Enter')submitRenameProject();if(event.key==='Escape')closeRenameProjectModal();">
-    </div>
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeRenameProjectModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="submitRenameProject()">Rename</button>
-    </div>
-  </div>
-</div>
-
-<!-- Confirm Delete Modal -->
-<div class="modal-overlay" id="confirm-delete-overlay">
-  <div class="modal" style="width:380px;text-align:center;">
-    <div style="font-size:32px;margin-bottom:12px;">🗑️</div>
-    <div class="modal-title" id="confirm-delete-title" style="justify-content:center;border:none;padding-bottom:0;">Delete asset?</div>
-    <p id="confirm-delete-msg" style="color:var(--text-muted);font-size:14px;margin:10px 0 24px;">This action cannot be undone.</p>
-    <div class="modal-actions" style="justify-content:center;gap:12px;">
-      <button class="btn btn-ghost" id="confirm-delete-cancel">Cancel</button>
-      <button class="btn btn-danger" id="confirm-delete-ok">Delete</button>
-    </div>
-  </div>
-</div>
-
-<!-- Settings Modal -->
-<div class="modal-overlay" id="settings-overlay">
-  <div class="modal" style="width:520px">
-    <div class="modal-title">
-      ⚙️ Settings
-      <button class="modal-close" onclick="closeSettings()">
-        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
-      </button>
-    </div>
-
-    <div class="form-group">
-      <label class="form-label">AI Provider <span style="font-weight:400;color:var(--text-dim);font-size:11px;">— click to switch</span></label>
-      <div class="provider-grid">
-        <div class="provider-card selected" data-provider="openai" onclick="selectProvider('openai')">
-          <div class="provider-card-icon">🤖</div>
-          <div>
-            <div class="provider-card-name">OpenAI</div>
-            <div class="provider-card-note">GPT-4o, DALL-E 3</div>
-          </div>
+      <!-- AI Fill toggle -->
+      <div class="ai-fill-toggle" id="new-page-ai-toggle" data-active="false" onclick="toggleAiFill()"
+        style="display:none">
+        <div class="ai-fill-toggle-icon">✨</div>
+        <div>
+          <div class="ai-fill-toggle-text">Pre-fill with AI</div>
         </div>
-        <div class="provider-card" data-provider="gemini" onclick="selectProvider('gemini')">
-          <div class="provider-card-icon">✨</div>
-          <div>
-            <div class="provider-card-name">Google Gemini</div>
-            <div class="provider-card-note">Gemini 2.0 Flash</div>
-          </div>
-        </div>
-        <div class="provider-card" data-provider="claude" onclick="selectProvider('claude')">
-          <div class="provider-card-icon">🤝</div>
-          <div>
-            <div class="provider-card-name">Claude</div>
-            <div class="provider-card-note">Claude 3.5 Haiku+</div>
-          </div>
-        </div>
-        <div class="provider-card" data-provider="openai-compatible" onclick="selectProvider('openai-compatible')">
-          <div class="provider-card-icon">🔌</div>
-          <div>
-            <div class="provider-card-name">OpenAI Compatible</div>
-            <div class="provider-card-note">Ollama, Together…</div>
-          </div>
+        <div class="ai-fill-toggle-check" id="ai-fill-check"></div>
+      </div>
+      <div id="new-page-ai-prefill-row" style="display:flex;gap:8px;margin-top:10px;">
+        <button type="button" onclick="toggleAiFill()"
+          style="background:transparent;border:1px dashed var(--border);border-radius:var(--radius-sm);padding:8px 14px;color:var(--text-dim);font-family:'Syne',sans-serif;font-size:13px;cursor:pointer;transition:all 0.13s;display:flex;align-items:center;gap:6px;width:100%;"
+          onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
+          ✨ Pre-fill with AI
+        </button>
+      </div>
+
+      <div id="new-page-ai-section" style="display:none;margin-top:14px;">
+        <div class="form-group">
+          <label class="form-label" id="ai-prompt-label" for="new-page-ai-prompt">Describe the content to
+            generate:</label>
+          <textarea class="form-textarea" id="new-page-ai-prompt"
+            placeholder="e.g. 'Write a guide on REST API design best practices'"></textarea>
         </div>
       </div>
-      <div id="active-provider-note" style="margin-top:8px;font-size:12px;color:var(--tomato);font-weight:600;">
-        ✅ Active: <span id="active-provider-label">OpenAI</span>
+
+      <!-- AI Image prompt section -->
+      <div id="new-page-image-section" style="display:none;margin-top:14px;">
+        <div class="form-group">
+          <label class="form-label" for="new-page-image-prompt">Describe the image to generate:</label>
+          <textarea class="form-textarea" id="new-page-image-prompt"
+            placeholder="e.g. 'A serene mountain lake at sunset, photorealistic'"></textarea>
+        </div>
       </div>
-      <input type="hidden" id="settings-provider" value="openai">
-    </div>
 
-    <div class="form-group" id="base-url-row" style="display:none">
-      <label class="form-label" for="settings-base-url">Base URL</label>
-      <input class="form-input" type="url" id="settings-base-url" placeholder="https://api.example.com/v1">
-    </div>
-
-    <div class="form-group">
-      <label class="form-label" for="settings-api-key">API Key</label>
-      <input class="form-input" type="password" id="settings-api-key" placeholder="Enter API key…" autocomplete="new-password">
-    </div>
-
-    <div class="form-group">
-      <label class="form-label" for="settings-model">Chat Model</label>
-      <input class="form-input" type="text" id="settings-model" placeholder="e.g. gpt-4o-mini">
-    </div>
-
-    <div class="form-group">
-      <label class="form-label" for="settings-image-model">Image Model</label>
-      <select class="form-select" id="settings-image-model" onchange="toggleCustomImageModel(this.value)">
-        <option value="dall-e-3">DALL-E 3 (OpenAI)</option>
-        <option value="dall-e-2">DALL-E 2 (OpenAI)</option>
-        <option value="imagen-3">Imagen 3 (Gemini)</option>
-        <option value="__custom__">Custom Model…</option>
-      </select>
-    </div>
-    <div class="form-group" id="custom-image-model-row" style="display:none;margin-top:-8px;">
-      <label class="form-label" for="settings-image-model-custom">Custom model name</label>
-      <input class="form-input" type="text" id="settings-image-model-custom" placeholder="e.g. my-org/custom-image-model" autocomplete="off">
-    </div>
-
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeSettings()">Cancel</button>
-      <button class="btn btn-primary" onclick="saveSettings()">
-        Save Settings
-      </button>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="closeNewPageModal()">Cancel</button>
+        <button class="btn btn-primary" id="new-page-submit" onclick="submitNewPage()">
+          <svg viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd"
+              d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z"
+              clip-rule="evenodd" />
+          </svg>
+          Create
+        </button>
+      </div>
     </div>
   </div>
-</div>
 
-<!-- ══ LIGHTBOX ════════════════════════════════════════════════════════════ -->
-<div class="lightbox" id="lightbox">
-  <button class="lightbox-close" onclick="closeLightbox()">✕</button>
-  <img class="lightbox-img" id="lightbox-img" src="" alt="">
-  <div class="lightbox-name" id="lightbox-name"></div>
-</div>
-
-<!-- ══ TOAST ══════════════════════════════════════════════════════════════ -->
-<div class="toast" id="toast">
-  <div class="toast-dot"></div>
-  <span class="toast-text"></span>
-</div>
-
-<!-- Rename Modal -->
-<div class="modal-overlay" id="rename-overlay">
-  <div class="modal" style="max-width:420px">
-    <div class="modal-title">
-      Rename
-      <button class="modal-close" onclick="document.getElementById('rename-overlay').classList.remove('open')">
-        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
-      </button>
-    </div>
-    <div class="form-group">
-      <label class="form-label" for="rename-input">New name</label>
-      <input class="form-input" type="text" id="rename-input" autocomplete="off" placeholder="Enter new name…">
-    </div>
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="document.getElementById('rename-overlay').classList.remove('open')">Cancel</button>
-      <button class="btn btn-primary" id="rename-submit-btn" onclick="submitRename()">Rename</button>
+  <!-- Create Project Modal -->
+  <div class="modal-overlay" id="create-project-overlay">
+    <div class="modal" style="width:360px">
+      <div class="modal-title">
+        ◈ New Project
+        <button class="modal-close" onclick="closeCreateProjectModal()">
+          <svg viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd"
+              d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+              clip-rule="evenodd" />
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <label class="form-label">Project name</label>
+        <input type="text" id="new-project-name" class="form-input" placeholder="e.g. Work, Personal…"
+          onkeydown="if(event.key==='Enter')submitCreateProject();if(event.key==='Escape')closeCreateProjectModal();">
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="closeCreateProjectModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="submitCreateProject()">Create</button>
+      </div>
     </div>
   </div>
-</div>
 
-<!-- Delete Confirm Modal -->
-<div class="modal-overlay" id="delete-overlay">
-  <div class="modal" style="max-width:420px">
-    <div class="modal-title">
-      Delete page?
-      <button class="modal-close" onclick="document.getElementById('delete-overlay').classList.remove('open')">
-        <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
-      </button>
-    </div>
-    <p style="margin:0 0 20px;color:var(--text-muted);font-size:14px;">
-      Are you sure you want to delete <strong id="delete-page-name"></strong>? This cannot be undone.
-    </p>
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="document.getElementById('delete-overlay').classList.remove('open')">Cancel</button>
-      <button class="btn btn-danger" id="delete-submit-btn" onclick="submitDelete()">Delete</button>
+  <div class="modal-overlay" id="rename-project-overlay">
+    <div class="modal" style="width:360px">
+      <div class="modal-title">
+        Rename workspace
+        <button class="modal-close" onclick="closeRenameProjectModal()">
+          <svg viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd"
+              d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+              clip-rule="evenodd" />
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <label class="form-label">Workspace name</label>
+        <input type="text" id="rename-project-input" class="form-input" placeholder="Enter new name…"
+          onkeydown="if(event.key==='Enter')submitRenameProject();if(event.key==='Escape')closeRenameProjectModal();">
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="closeRenameProjectModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="submitRenameProject()">Rename</button>
+      </div>
     </div>
   </div>
-</div>
 
-<!-- Scripts — compiled TypeScript bundle (api + app combined) -->
-<script src="/js/app.bundle.js"></script>
+  <!-- Confirm Delete Modal -->
+  <div class="modal-overlay" id="confirm-delete-overlay">
+    <div class="modal" style="width:380px;text-align:center;">
+      <div style="font-size:32px;margin-bottom:12px;">🗑️</div>
+      <div class="modal-title" id="confirm-delete-title" style="justify-content:center;border:none;padding-bottom:0;">
+        Delete asset?</div>
+      <p id="confirm-delete-msg" style="color:var(--text-muted);font-size:14px;margin:10px 0 24px;">This action cannot
+        be undone.</p>
+      <div class="modal-actions" style="justify-content:center;gap:12px;">
+        <button class="btn btn-ghost" id="confirm-delete-cancel">Cancel</button>
+        <button class="btn btn-danger" id="confirm-delete-ok">Delete</button>
+      </div>
+    </div>
+  </div>
 
-<!-- Dev live-reload (ignored in prod) -->
-<script>
-if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
-  (function() {
-    var es = new EventSource('http://localhost:4568/esbuild');
-    es.addEventListener('message', function(e) {
-      if (e.data === 'reload') { location.reload(); }
-    });
-    es.onerror = function() { es.close(); };
-  })();
-}
-</script>
+  <!-- Settings Modal -->
+  <div class="modal-overlay" id="settings-overlay">
+    <div class="modal settings-modal">
+      <div class="modal-title">
+        ⚙️ AI Settings
+        <button class="modal-close" onclick="closeSettings()">
+          <svg viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd"
+              d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+              clip-rule="evenodd" />
+          </svg>
+        </button>
+      </div>
+
+      <div class="settings-split">
+        <!-- Left: Profile List -->
+        <div class="settings-profiles">
+          <div class="settings-profiles-header">
+            <span class="settings-profiles-title">Profiles</span>
+            <button class="btn-icon" id="add-profile-btn" title="Add profile" onclick="addNewProfile()">
+              <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd"
+                  d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z"
+                  clip-rule="evenodd" />
+              </svg>
+            </button>
+          </div>
+          <div class="settings-profiles-list" id="profiles-list">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+
+        <!-- Right: Edit Form -->
+        <div class="settings-form" id="profile-form">
+          <div class="form-group">
+            <label class="form-label" for="profile-name">Profile Name</label>
+            <input class="form-input" type="text" id="profile-name" placeholder="e.g. My OpenAI">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">AI Provider <span style="font-weight:400;color:var(--text-dim);font-size:11px;">—
+                click to switch</span></label>
+            <div class="provider-grid">
+              <div class="provider-card selected" data-provider="openai" onclick="selectProvider('openai')">
+                <div class="provider-card-icon"><svg width="22" height="22" viewBox="0 0 24 24">
+                    <path fill="currentColor"
+                      d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.998 5.998 0 0 0-3.998 2.9 6.042 6.042 0 0 0 .743 7.097 5.98 5.98 0 0 0 .51 4.911 6.051 6.051 0 0 0 6.515 2.9A5.985 5.985 0 0 0 13.26 24a6.056 6.056 0 0 0 5.772-4.206 5.99 5.99 0 0 0 3.997-2.9 6.056 6.056 0 0 0-.747-7.073zM13.26 22.43a4.476 4.476 0 0 1-2.876-1.04l.141-.081 4.779-2.758a.795.795 0 0 0 .392-.681v-6.737l2.02 1.168a.071.071 0 0 1 .038.052v5.583a4.504 4.504 0 0 1-4.494 4.494zM3.6 18.304a4.47 4.47 0 0 1-.535-3.014l.142.085 4.783 2.759a.771.771 0 0 0 .78 0l5.843-3.369v2.332a.08.08 0 0 1-.033.062L9.74 19.95a4.5 4.5 0 0 1-6.14-1.646zM2.34 7.896a4.485 4.485 0 0 1 2.366-1.973V11.6a.766.766 0 0 0 .388.676l5.815 3.355-2.02 1.168a.076.076 0 0 1-.071 0l-4.83-2.786A4.504 4.504 0 0 1 2.34 7.872zm16.597 3.855l-5.833-3.387L15.119 7.2a.076.076 0 0 1 .071 0l4.83 2.791a4.494 4.494 0 0 1-.676 8.105v-5.678a.79.79 0 0 0-.407-.667zm2.01-3.023l-.141-.085-4.774-2.782a.776.776 0 0 0-.785 0L9.409 9.23V6.897a.066.066 0 0 1 .028-.061l4.83-2.787a4.5 4.5 0 0 1 6.68 4.66zm-12.64 4.135l-2.02-1.164a.08.08 0 0 1-.038-.057V6.075a4.5 4.5 0 0 1 7.375-3.453l-.142.08L8.704 5.46a.795.795 0 0 0-.393.681zm1.097-2.365l2.602-1.5 2.607 1.5v2.999l-2.597 1.5-2.607-1.5z" />
+                  </svg></div>
+                <div>
+                  <div class="provider-card-name">OpenAI</div>
+                  <div class="provider-card-note">GPT-4o, DALL-E 3</div>
+                </div>
+              </div>
+              <div class="provider-card" data-provider="gemini" onclick="selectProvider('gemini')">
+                <div class="provider-card-icon"><svg width="22" height="22" viewBox="0 0 24 24">
+                    <path fill="currentColor"
+                      d="M12 0C5.352 0 0 5.352 0 12s5.352 12 12 12 12-5.352 12-12S18.648 0 12 0zm0 2.4a9.6 9.6 0 0 1 9.6 9.6c0 .12-.012.24-.012.348-1.836-3.468-5.46-5.748-9.588-5.748S4.248 8.88 2.412 12.348A9.355 9.355 0 0 1 2.4 12 9.6 9.6 0 0 1 12 2.4zm0 19.2A9.6 9.6 0 0 1 2.4 12c0-.12.012-.24.012-.348C4.248 15.12 7.872 17.4 12 17.4s7.752-2.28 9.588-5.748c0 .108.012.228.012.348a9.6 9.6 0 0 1-9.6 9.6z" />
+                  </svg></div>
+                <div>
+                  <div class="provider-card-name">Google Gemini</div>
+                  <div class="provider-card-note">Gemini 2.0 Flash</div>
+                </div>
+              </div>
+              <div class="provider-card" data-provider="claude" onclick="selectProvider('claude')">
+                <div class="provider-card-icon"><svg width="22" height="22" viewBox="0 0 24 24">
+                    <path fill="currentColor"
+                      d="M17.304 4.044l-3.672 12.348h-2.88L7.08 4.044h2.736l2.232 8.688 2.328-8.688zM5.4 17.604h13.2v2.352H5.4z" />
+                  </svg></div>
+                <div>
+                  <div class="provider-card-name">Claude</div>
+                  <div class="provider-card-note">Claude 3.5 Haiku+</div>
+                </div>
+              </div>
+              <div class="provider-card" data-provider="openai-compatible"
+                onclick="selectProvider('openai-compatible')">
+                <div class="provider-card-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="2" y="2" width="8" height="8" rx="1" />
+                    <rect x="14" y="2" width="8" height="8" rx="1" />
+                    <rect x="2" y="14" width="8" height="8" rx="1" />
+                    <path d="M14 14h4v4h4M14 18h4" />
+                  </svg></div>
+                <div>
+                  <div class="provider-card-name">OpenAI Compatible</div>
+                  <div class="provider-card-note">Ollama, Together…</div>
+                </div>
+              </div>
+            </div>
+            <input type="hidden" id="settings-provider" value="openai">
+          </div>
+
+          <div class="form-group" id="base-url-row" style="display:none">
+            <label class="form-label" for="settings-base-url">Base URL</label>
+            <input class="form-input" type="url" id="settings-base-url" placeholder="https://api.example.com/v1">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="settings-api-key">API Key</label>
+            <input class="form-input" type="password" id="settings-api-key" placeholder="Enter API key…"
+              autocomplete="new-password">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="settings-model">Chat Model</label>
+            <input class="form-input" type="text" id="settings-model" placeholder="e.g. gpt-4o-mini">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="settings-image-model">Image Model <span
+                style="font-weight:400;color:var(--text-dim);font-size:11px;">— optional</span></label>
+            <input class="form-input" type="text" id="settings-image-model" placeholder="e.g. dall-e-3, imagen-3">
+          </div>
+
+          <div class="modal-actions profile-actions">
+            <button class="btn btn-ghost btn-sm" id="delete-profile-btn" onclick="deleteCurrentProfile()">
+              <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd"
+                  d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
+                  clip-rule="evenodd" />
+              </svg>
+              Delete
+            </button>
+            <div style="display:flex;gap:8px;">
+              <button class="btn btn-ghost btn-sm" id="set-active-btn" onclick="setActiveCurrentProfile()">★ Set
+                Active</button>
+              <button class="btn btn-primary btn-sm" onclick="saveCurrentProfile()">Save</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-empty" id="profile-empty" style="display:none">
+        <p>No profiles yet. Click <strong>+</strong> to create one.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ LIGHTBOX ════════════════════════════════════════════════════════════ -->
+  <div class="lightbox" id="lightbox">
+    <button class="lightbox-close" onclick="closeLightbox()">✕</button>
+    <img class="lightbox-img" id="lightbox-img" src="" alt="">
+    <div class="lightbox-name" id="lightbox-name"></div>
+  </div>
+
+  <!-- ══ TOAST ══════════════════════════════════════════════════════════════ -->
+  <div class="toast" id="toast">
+    <div class="toast-dot"></div>
+    <span class="toast-text"></span>
+  </div>
+
+  <!-- ══ MASCOT LOADING OVERLAY ════════════════════════════════════════════ -->
+  <div class="mascot-loading-overlay" id="mascot-loading">
+    <div class="mascot-loading-stage">
+      <div class="mascot-loading-glow"></div>
+      <div class="mascot-loading-sparkle"></div>
+      <div class="mascot-loading-sparkle"></div>
+      <div class="mascot-loading-sparkle"></div>
+      <div class="mascot-loading-sparkle"></div>
+      <div class="mascot-loading-sparkle"></div>
+      <div class="mascot-loading-sparkle"></div>
+      <img src="/mascot.svg" alt="Loading" class="mascot-loading-img">
+      <div class="mascot-loading-shadow"></div>
+    </div>
+    <div class="mascot-loading-text" id="mascot-loading-text">Working on it…</div>
+    <div class="mascot-loading-sub" id="mascot-loading-sub">Yoyo is thinking</div>
+  </div>
+
+  <!-- Rename Modal -->
+  <div class="modal-overlay" id="rename-overlay">
+    <div class="modal" style="max-width:420px">
+      <div class="modal-title">
+        Rename
+        <button class="modal-close" onclick="document.getElementById('rename-overlay').classList.remove('open')">
+          <svg viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd"
+              d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+              clip-rule="evenodd" />
+          </svg>
+        </button>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="rename-input">New name</label>
+        <input class="form-input" type="text" id="rename-input" autocomplete="off" placeholder="Enter new name…">
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost"
+          onclick="document.getElementById('rename-overlay').classList.remove('open')">Cancel</button>
+        <button class="btn btn-primary" id="rename-submit-btn" onclick="submitRename()">Rename</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Delete Confirm Modal -->
+  <div class="modal-overlay" id="delete-overlay">
+    <div class="modal" style="max-width:420px">
+      <div class="modal-title">
+        Delete page?
+        <button class="modal-close" onclick="document.getElementById('delete-overlay').classList.remove('open')">
+          <svg viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd"
+              d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+              clip-rule="evenodd" />
+          </svg>
+        </button>
+      </div>
+      <p style="margin:0 0 20px;color:var(--text-muted);font-size:14px;">
+        Are you sure you want to delete <strong id="delete-page-name"></strong>? This cannot be undone.
+      </p>
+      <div class="modal-actions">
+        <button class="btn btn-ghost"
+          onclick="document.getElementById('delete-overlay').classList.remove('open')">Cancel</button>
+        <button class="btn btn-danger" id="delete-submit-btn" onclick="submitDelete()">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts — compiled TypeScript bundle (api + app combined) -->
+  <script src="/js/app.bundle.js"></script>
+
+  <!-- Dev live-reload (ignored in prod) -->
+  <script>
+    if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+      (function () {
+        var es = new EventSource('http://localhost:4568/esbuild');
+        es.addEventListener('message', function (e) {
+          if (e.data === 'reload') { location.reload(); }
+        });
+        es.onerror = function () { es.close(); };
+      })();
+    }
+  </script>
 </body>
+
 </html>

@@ -1,6 +1,6 @@
 // src/client/app.ts — Main application logic (filesystem-backed)
 import { api, getCurrentProjectId, setCurrentProjectId } from './api.js';
-import type { PageNode, Asset, Settings, LLMMessage, Project } from '../shared/types.js';
+import type { PageNode, Asset, Settings, LLMMessage, Project, LLMProfile } from '../shared/types.js';
 
 // ── TipTap bundle type declaration ────────────────────────────────────────────
 interface TipTapBundle {
@@ -48,8 +48,7 @@ declare global {
     openSettings: () => void;
     closeSettings: () => void;
     selectProvider: (p: string) => void;
-    saveSettings: () => void;
-    toggleCustomImageModel: (val: string) => void;
+
     toggleHtmlEditMode: () => void;
     submitCompose: () => void;
     triggerUpload: (pageId: string) => void;
@@ -70,6 +69,11 @@ declare global {
     submitRenameProject: () => void;
     toggleProjectMenu: () => void;
     cloudLogout: () => void;
+    addNewProfile: () => void;
+    deleteCurrentProfile: () => void;
+    setActiveCurrentProfile: () => void;
+    saveCurrentProfile: () => void;
+    selectProfileItem: (id: string) => void;
   }
 
   // Marked declared as global from CDN script tag
@@ -114,6 +118,17 @@ const state: AppState = {
 // ── DOM helpers ───────────────────────────────────────────────────────────────
 const $ = (id: string): HTMLElement => document.getElementById(id) as HTMLElement;
 const $$ = (sel: string): NodeListOf<HTMLElement> => document.querySelectorAll(sel);
+const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+function showMascotLoading(text = 'Working on it…', sub = 'Yoyo is thinking'): void {
+  $('mascot-loading-text').textContent = text;
+  $('mascot-loading-sub').textContent = sub;
+  $('mascot-loading').classList.add('active');
+}
+
+function hideMascotLoading(): void {
+  $('mascot-loading').classList.remove('active');
+}
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function init(): Promise<void> {
@@ -135,8 +150,7 @@ async function init(): Promise<void> {
   window.openSettings = openSettings;
   window.closeSettings = closeSettings;
   window.selectProvider = selectProvider;
-  window.saveSettings = saveSettings;
-  window.toggleCustomImageModel = toggleCustomImageModel;
+
   window.toggleHtmlEditMode = toggleHtmlEditMode;
   window.submitCompose = submitCompose;
   window.triggerUpload = triggerUpload;
@@ -155,6 +169,11 @@ async function init(): Promise<void> {
   window.openRenameProjectModal = openRenameProjectModal;
   window.closeRenameProjectModal = closeRenameProjectModal;
   window.submitRenameProject = submitRenameProject;
+  window.addNewProfile = addNewProfile;
+  window.deleteCurrentProfile = deleteCurrentProfile;
+  window.setActiveCurrentProfile = setActiveCurrentProfile;
+  window.saveCurrentProfile = saveCurrentProfile;
+  window.selectProfileItem = selectProfileItem;
   // Enable GFM (tables, strikethrough, task lists) globally
   if (typeof marked !== 'undefined') {
     marked.use({ gfm: true });
@@ -248,9 +267,9 @@ function renderProjectSwitcher(): void {
     <div class="project-menu" id="project-menu">
       <div class="project-menu-label">Workspaces</div>
       ${state.projects.map(p => {
-        const isActive = p.id === currentId;
-        // Use <div role="button"> so we can nest real <button> inside for delete
-        return `
+    const isActive = p.id === currentId;
+    // Use <div role="button"> so we can nest real <button> inside for delete
+    return `
         <div class="project-menu-item${isActive ? ' project-menu-item--active' : ''}"
              role="button" tabindex="0"
              onclick="switchProject('${p.id}')"
@@ -274,7 +293,7 @@ function renderProjectSwitcher(): void {
                  </button>` : ''}
                </span>
         </div>`;
-      }).join('')}
+  }).join('')}
       <div class="project-menu-divider"></div>
       <div class="project-menu-item project-menu-new"
            role="button" tabindex="0"
@@ -311,7 +330,15 @@ async function switchProject(id: string): Promise<void> {
   // Reload UI
   renderProjectSwitcher();
   await loadPages();
-  $('main-content').innerHTML = '<div class="empty-state"><p>Select a page to get started.</p></div>';
+
+  // Auto-select the first page/folder in the new project
+  const firstItem = state.pages.find(p => !p.parent_id);
+  if (firstItem) {
+    await navigateTo(firstItem.id);
+  } else {
+    const contentArea = $('content-area');
+    if (contentArea) contentArea.innerHTML = '<div class="empty-state"><p>This project is empty. Create a page to get started.</p></div>';
+  }
   showToast(`Switched to ${state.projects.find(p => p.id === id)?.name ?? id}`);
 }
 
@@ -663,8 +690,8 @@ function updateTopbar(page: PageNode): void {
 }
 
 // No-op stubs kept for API safety
-function toggleEditMode(): void {}
-function updatePreviewToggleBtn(): void {}
+function toggleEditMode(): void { }
+function updatePreviewToggleBtn(): void { }
 
 // ── WYSIWYG Editor (TipTap — loaded from local bundle) ───────────────────────
 
@@ -959,9 +986,9 @@ function renderFolderView(page: PageNode, container: HTMLElement): void {
       ${children.length ? `
         <div class="children-grid">
           ${children.map(child => {
-            const childName = child.display_name || child.name;
-            const ext = child.file_type || '';
-            return `
+    const childName = child.display_name || child.name;
+    const ext = child.file_type || '';
+    return `
               <div class="child-card" onclick="navigateTo('${child.id}')">
                 <div class="child-card-icon ${child.type === 'folder' ? 'folder' : ext}">
                   ${child.type === 'folder' ? '📁' : ext === 'html' ? '🌐' : '📝'}
@@ -970,7 +997,7 @@ function renderFolderView(page: PageNode, container: HTMLElement): void {
                 <div class="child-card-meta">${child.type === 'folder' ? `${(state.pages.filter(p => p.parent_id === child.id).length + ((child as any).asset_count || 0))} items` : ext.toUpperCase() || 'MD'}</div>
               </div>
             `;
-          }).join('')}
+  }).join('')}
         </div>
       ` : `
         <div style="color:var(--text-dim);font-size:14px;padding:20px 0;">
@@ -1020,8 +1047,8 @@ function renderAssetsSection(page: PageNode): string {
       ${files.length ? `
         <div class="section-heading" style="margin-top:${imgs.length ? '24px' : 0}">Files · ${files.length}</div>
         ${files.map(a => {
-          const ext = a.original_name.split('.').pop()?.toUpperCase() || '';
-          return `
+    const ext = a.original_name.split('.').pop()?.toUpperCase() || '';
+    return `
             <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);padding:12px 16px;display:flex;align-items:center;gap:12px;margin-bottom:7px;">
               <div style="font-size:24px;flex-shrink:0">📄</div>
               <div style="flex:1;min-width:0">
@@ -1034,7 +1061,7 @@ function renderAssetsSection(page: PageNode): string {
               </div>
             </div>
           `;
-        }).join('')}
+  }).join('')}
       ` : ''}
     </div>
   `;
@@ -1206,12 +1233,12 @@ function closeNewPageModal(): void {
 function updateTypeOptions(type: string): void {
   $$('.type-option').forEach(opt => opt.classList.toggle('selected', opt.dataset.type === type));
   const isFolder = type === 'folder';
-  const isImage  = type === 'image';
-  $('new-page-file-type-row').style.display  = (isFolder || isImage) ? 'none' : '';
-  $('new-page-parent-row').style.display     = (isFolder || isImage) ? 'none' : '';
+  const isImage = type === 'image';
+  $('new-page-file-type-row').style.display = (isFolder || isImage) ? 'none' : '';
+  $('new-page-parent-row').style.display = (isFolder || isImage) ? 'none' : '';
   $('new-page-ai-prefill-row').style.display = isImage ? 'none' : '';
-  $('new-page-ai-section').style.display     = 'none';
-  $('new-page-image-section').style.display  = isImage ? '' : 'none';
+  $('new-page-ai-section').style.display = 'none';
+  $('new-page-image-section').style.display = isImage ? '' : 'none';
   // Update name field label + placeholder to match context
   const nameInput = $('new-page-name') as HTMLInputElement;
   const nameLabel = nameInput.previousElementSibling as HTMLLabelElement;
@@ -1253,8 +1280,8 @@ async function submitNewPage(): Promise<void> {
     if (!imagePrompt) { showToast('Please describe the image', 'error'); return; }
     const btn = $('new-page-submit') as HTMLButtonElement;
     btn.disabled = true; btn.textContent = 'Generating…';
+    showMascotLoading('Generating image…', 'Yoyo is painting your idea');
     try {
-      showToast('Generating image… ⏳');
       const page_id = state.currentPageId ?? undefined;
       await api.generateImg({ prompt: imagePrompt, page_id });
       closeNewPageModal();
@@ -1263,6 +1290,7 @@ async function submitNewPage(): Promise<void> {
     } catch (err) {
       showToast('Failed: ' + (err as Error).message, 'error');
     } finally {
+      hideMascotLoading();
       btn.disabled = false; btn.textContent = 'Create';
     }
     return;
@@ -1299,9 +1327,13 @@ async function submitNewPage(): Promise<void> {
     let content = '';
 
     if (type === 'page' && aiPrompt) {
-      showToast('Generating content with AI… ⏳');
-      const { content: gen } = await api.generate({ prompt: aiPrompt, type: fileType as 'md' | 'html' });
-      content = gen;
+      showMascotLoading('Generating content…', 'Yoyo is writing your page');
+      try {
+        const { content: gen } = await api.generate({ prompt: aiPrompt, type: fileType as 'md' | 'html' });
+        content = gen;
+      } finally {
+        hideMascotLoading();
+      }
     }
 
     const { page } = await api.createPage({
@@ -1475,6 +1507,7 @@ async function submitCompose(): Promise<void> {
   const btn = $('compose-submit') as HTMLButtonElement;
   btn.disabled = true;
   btn.textContent = 'Generating…';
+  showMascotLoading('Generating section…', 'Yoyo is composing new content');
 
   try {
     const { content: newSection } = await api.generate({
@@ -1493,6 +1526,7 @@ async function submitCompose(): Promise<void> {
   } catch (err) {
     showToast('AI failed: ' + (err as Error).message, 'error');
   } finally {
+    hideMascotLoading();
     btn.disabled = false;
     btn.textContent = '✨ Generate';
   }
@@ -1524,7 +1558,7 @@ function renderChatMessages(): void {
     <div class="chat-msg ${m.role}">
       ${m.role === 'assistant' ? '<img src="/mascot.svg" alt="AI" class="chat-msg-avatar">' : ''}
       <div class="chat-msg-bubble">
-        <div class="chat-msg-role">${m.role === 'user' ? 'You' : 'Yoinko'}</div>
+        <div class="chat-msg-role">${m.role === 'user' ? 'You' : 'Yoyo'}</div>
         <div class="chat-msg-content">${m.role === 'assistant' ? renderMarkdownSimple(m.content) : esc(m.content)}</div>
       </div>
     </div>
@@ -1556,7 +1590,7 @@ async function sendChatMessage(): Promise<void> {
     <div class="chat-msg assistant" id="${typingId}">
       <img src="/mascot.svg" alt="AI" class="chat-msg-avatar">
       <div class="chat-msg-bubble">
-        <div class="chat-msg-role">Yoinko</div>
+        <div class="chat-msg-role">Yoyo</div>
         <div class="chat-typing"><div class="chat-typing-dot"></div><div class="chat-typing-dot"></div><div class="chat-typing-dot"></div></div>
       </div>
     </div>
@@ -1619,29 +1653,62 @@ async function applyAiSuggestion(): Promise<void> {
   } catch { /* silently fail */ }
 }
 
-// ── Settings modal ────────────────────────────────────────────────────────────
+// ── Settings modal — Multi-Profile LLM Config ────────────────────────────────
+
+type ProfileWithMask = LLMProfile & { api_key_masked?: string };
+
+let profilesList: ProfileWithMask[] = [];
+let activeProfileId = '';
+let selectedProfileId = '';
+
+const PROVIDER_ICONS: Record<string, string> = {
+  openai: '<svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentColor" d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.998 5.998 0 0 0-3.998 2.9 6.042 6.042 0 0 0 .743 7.097 5.98 5.98 0 0 0 .51 4.911 6.051 6.051 0 0 0 6.515 2.9A5.985 5.985 0 0 0 13.26 24a6.056 6.056 0 0 0 5.772-4.206 5.99 5.99 0 0 0 3.997-2.9 6.056 6.056 0 0 0-.747-7.073zM13.26 22.43a4.476 4.476 0 0 1-2.876-1.04l.141-.081 4.779-2.758a.795.795 0 0 0 .392-.681v-6.737l2.02 1.168a.071.071 0 0 1 .038.052v5.583a4.504 4.504 0 0 1-4.494 4.494zM3.6 18.304a4.47 4.47 0 0 1-.535-3.014l.142.085 4.783 2.759a.771.771 0 0 0 .78 0l5.843-3.369v2.332a.08.08 0 0 1-.033.062L9.74 19.95a4.5 4.5 0 0 1-6.14-1.646zM2.34 7.896a4.485 4.485 0 0 1 2.366-1.973V11.6a.766.766 0 0 0 .388.676l5.815 3.355-2.02 1.168a.076.076 0 0 1-.071 0l-4.83-2.786A4.504 4.504 0 0 1 2.34 7.872zm16.597 3.855l-5.833-3.387L15.119 7.2a.076.076 0 0 1 .071 0l4.83 2.791a4.494 4.494 0 0 1-.676 8.105v-5.678a.79.79 0 0 0-.407-.667zm2.01-3.023l-.141-.085-4.774-2.782a.776.776 0 0 0-.785 0L9.409 9.23V6.897a.066.066 0 0 1 .028-.061l4.83-2.787a4.5 4.5 0 0 1 6.68 4.66zm-12.64 4.135l-2.02-1.164a.08.08 0 0 1-.038-.057V6.075a4.5 4.5 0 0 1 7.375-3.453l-.142.08L8.704 5.46a.795.795 0 0 0-.393.681zm1.097-2.365l2.602-1.5 2.607 1.5v2.999l-2.597 1.5-2.607-1.5z"/></svg>',
+  gemini: '<svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentColor" d="M12 0C5.352 0 0 5.352 0 12s5.352 12 12 12 12-5.352 12-12S18.648 0 12 0zm0 2.4a9.6 9.6 0 0 1 9.6 9.6c0 .12-.012.24-.012.348-1.836-3.468-5.46-5.748-9.588-5.748S4.248 8.88 2.412 12.348A9.355 9.355 0 0 1 2.4 12 9.6 9.6 0 0 1 12 2.4zm0 19.2A9.6 9.6 0 0 1 2.4 12c0-.12.012-.24.012-.348C4.248 15.12 7.872 17.4 12 17.4s7.752-2.28 9.588-5.748c0 .108.012.228.012.348a9.6 9.6 0 0 1-9.6 9.6z"/></svg>',
+  claude: '<svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentColor" d="M17.304 4.044l-3.672 12.348h-2.88L7.08 4.044h2.736l2.232 8.688 2.328-8.688zM5.4 17.604h13.2v2.352H5.4z"/></svg>',
+  'openai-compatible': '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="8" height="8" rx="1"/><rect x="14" y="2" width="8" height="8" rx="1"/><rect x="2" y="14" width="8" height="8" rx="1"/><path d="M14 14h4v4h4M14 18h4"/></svg>',
+};
+
+const PROVIDER_DEFAULTS: Record<string, string> = {
+  openai: 'gpt-4o-mini',
+  gemini: 'gemini-2.0-flash',
+  claude: 'claude-3-5-haiku-20241022',
+  'openai-compatible': '',
+};
+
 async function openSettings(): Promise<void> {
   $('settings-overlay').classList.add('open');
   try {
-    const { settings } = await api.getSettings();
-    state.settings = settings;
-    ($('settings-provider') as HTMLSelectElement).value = settings.llm_provider || 'openai';
-    ($('settings-model') as HTMLInputElement).value = settings.llm_model || '';
-    ($('settings-api-key') as HTMLInputElement).value = '';
-    ($('settings-api-key') as HTMLInputElement).placeholder = (settings as Record<string, string>).llm_api_key_masked || 'Enter API key…';
-    ($('settings-base-url') as HTMLInputElement).value = settings.llm_base_url || '';
-    const knownModels = ['dall-e-3', 'dall-e-2', 'imagen-3'];
-    const savedModel = settings.image_model || 'dall-e-3';
-    const isCustom = !knownModels.includes(savedModel);
-    const selectEl = $('settings-image-model') as HTMLSelectElement;
-    selectEl.value = isCustom ? '__custom__' : savedModel;
-    toggleCustomImageModel(selectEl.value);
-    if (isCustom) {
-      ($('settings-image-model-custom') as HTMLInputElement).value = savedModel;
+    const { profiles, activeId } = await api.getProfiles();
+    profilesList = profiles;
+    activeProfileId = activeId;
+
+    // Legacy migration: if no profiles exist but legacy settings do, create one
+    if (profiles.length === 0) {
+      const { settings } = await api.getSettings();
+      if (settings.llm_provider || settings.llm_api_key) {
+        const migrated: LLMProfile = {
+          id: crypto.randomUUID(),
+          name: 'Default',
+          provider: settings.llm_provider || 'openai',
+          model: settings.llm_model || '',
+          api_key: settings.llm_api_key || '',
+          base_url: settings.llm_base_url || '',
+          image_model: settings.image_model || 'dall-e-3',
+        };
+        await api.saveProfile(migrated);
+        await api.setActiveProfile(migrated.id);
+        const refreshed = await api.getProfiles();
+        profilesList = refreshed.profiles;
+        activeProfileId = refreshed.activeId;
+      }
     }
-    updateProviderCards(settings.llm_provider || 'openai');
-    updateProviderUI(settings.llm_provider || 'openai');
-    updateActiveProviderLabel(settings.llm_provider || 'openai');
+
+    renderProfilesList();
+    if (profilesList.length > 0) {
+      selectProfileItem(activeProfileId || profilesList[0].id);
+    } else {
+      showEmptyState();
+    }
   } catch {
     showToast('Failed to load settings', 'error');
   }
@@ -1651,19 +1718,149 @@ function closeSettings(): void {
   $('settings-overlay').classList.remove('open');
 }
 
+function renderProfilesList(): void {
+  const list = $('profiles-list');
+  list.innerHTML = profilesList.map(p => `
+    <div class="profile-item ${p.id === selectedProfileId ? 'selected' : ''}" onclick="selectProfileItem('${p.id}')">
+      <span class="profile-item-icon">${PROVIDER_ICONS[p.provider] || '🤖'}</span>
+      <span class="profile-item-name">${escapeHtml(p.name)}</span>
+      ${p.id === activeProfileId ? '<span class="profile-active-badge">active</span>' : ''}
+    </div>
+  `).join('');
+}
+
+function selectProfileItem(id: string): void {
+  selectedProfileId = id;
+  renderProfilesList();
+  const profile = profilesList.find(p => p.id === id);
+  if (!profile) return;
+
+  // Show form, hide empty
+  $('profile-form').style.display = '';
+  $('profile-empty').style.display = 'none';
+
+  // Populate form
+  ($('profile-name') as HTMLInputElement).value = profile.name;
+  ($('settings-provider') as HTMLSelectElement).value = profile.provider || 'openai';
+  ($('settings-model') as HTMLInputElement).value = profile.model || '';
+  ($('settings-api-key') as HTMLInputElement).value = '';
+  ($('settings-api-key') as HTMLInputElement).placeholder = profile.api_key_masked || 'Enter API key…';
+  ($('settings-base-url') as HTMLInputElement).value = profile.base_url || '';
+
+  ($('settings-image-model') as HTMLInputElement).value = profile.image_model || '';
+
+  updateProviderCards(profile.provider || 'openai');
+  updateProviderUI(profile.provider || 'openai');
+
+  // Update active button state
+  const activeBtn = $('set-active-btn') as HTMLButtonElement;
+  if (id === activeProfileId) {
+    activeBtn.textContent = '★ Active';
+    activeBtn.disabled = true;
+    activeBtn.className = 'btn btn-danger btn-sm';
+  } else {
+    activeBtn.textContent = '★ Set Active';
+    activeBtn.disabled = false;
+    activeBtn.className = 'btn btn-primary btn-sm';
+  }
+}
+
+function showEmptyState(): void {
+  $('profile-form').style.display = 'none';
+  $('profile-empty').style.display = '';
+}
+
+function addNewProfile(): void {
+  const id = crypto.randomUUID();
+  const newProfile: ProfileWithMask = {
+    id,
+    name: `Profile ${profilesList.length + 1}`,
+    provider: 'openai',
+    model: 'gpt-4o-mini',
+    api_key: '',
+    base_url: '',
+    image_model: 'dall-e-3',
+    api_key_masked: '',
+  };
+  profilesList.push(newProfile);
+  renderProfilesList();
+  selectProfileItem(id);
+  ($('profile-name') as HTMLInputElement).focus();
+}
+
+async function saveCurrentProfile(): Promise<void> {
+  const profile = profilesList.find(p => p.id === selectedProfileId);
+  if (!profile) return;
+
+  const updated: LLMProfile = {
+    id: profile.id,
+    name: ($('profile-name') as HTMLInputElement).value.trim() || profile.name,
+    provider: ($('settings-provider') as HTMLSelectElement).value as LLMProfile['provider'],
+    model: ($('settings-model') as HTMLInputElement).value,
+    api_key: ($('settings-api-key') as HTMLInputElement).value || '',
+    base_url: ($('settings-base-url') as HTMLInputElement).value,
+    image_model: ($('settings-image-model') as HTMLInputElement).value.trim(),
+  };
+
+  try {
+    await api.saveProfile(updated);
+    // Refresh the list
+    const { profiles, activeId } = await api.getProfiles();
+    profilesList = profiles;
+    activeProfileId = activeId;
+    renderProfilesList();
+    selectProfileItem(profile.id);
+    showToast('Profile saved!');
+  } catch (err) {
+    showToast('Save failed: ' + (err as Error).message, 'error');
+  }
+}
+
+async function deleteCurrentProfile(): Promise<void> {
+  if (!selectedProfileId) return;
+  const profile = profilesList.find(p => p.id === selectedProfileId);
+  if (!profile) return;
+
+  if (!confirm(`Delete profile "${profile.name}"?`)) return;
+
+  try {
+    await api.deleteProfile(selectedProfileId);
+    const { profiles, activeId } = await api.getProfiles();
+    profilesList = profiles;
+    activeProfileId = activeId;
+    renderProfilesList();
+    if (profilesList.length > 0) {
+      selectProfileItem(activeProfileId || profilesList[0].id);
+    } else {
+      selectedProfileId = '';
+      showEmptyState();
+    }
+    showToast('Profile deleted');
+  } catch (err) {
+    showToast('Delete failed: ' + (err as Error).message, 'error');
+  }
+}
+
+async function setActiveCurrentProfile(): Promise<void> {
+  if (!selectedProfileId || selectedProfileId === activeProfileId) return;
+  try {
+    await api.setActiveProfile(selectedProfileId);
+    activeProfileId = selectedProfileId;
+    renderProfilesList();
+    selectProfileItem(selectedProfileId);
+    const name = profilesList.find(p => p.id === selectedProfileId)?.name || '';
+    showToast(`"${name}" is now active`);
+  } catch (err) {
+    showToast('Failed: ' + (err as Error).message, 'error');
+  }
+}
+
 function selectProvider(p: string): void {
   ($('settings-provider') as HTMLSelectElement).value = p;
   updateProviderCards(p);
   updateProviderUI(p);
-  updateActiveProviderLabel(p);
-  const defaults: Record<string, string> = {
-    openai: 'gpt-4o-mini',
-    gemini: 'gemini-2.0-flash',
-    claude: 'claude-3-5-haiku-20241022',
-    'openai-compatible': '',
-  };
   const modelEl = $('settings-model') as HTMLInputElement;
-  if (!modelEl.value) modelEl.value = defaults[p] || '';
+  if (!modelEl.value) modelEl.value = PROVIDER_DEFAULTS[p] || '';
 }
 
 function updateProviderCards(p: string): void {
@@ -1674,46 +1871,9 @@ function updateProviderUI(p: string): void {
   $('base-url-row').style.display = p === 'openai-compatible' ? '' : 'none';
 }
 
-function updateActiveProviderLabel(p: string): void {
-  const labels: Record<string, string> = {
-    openai: 'OpenAI',
-    gemini: 'Google Gemini',
-    claude: 'Anthropic Claude',
-    'openai-compatible': 'OpenAI Compatible',
-  };
-  const el = $('active-provider-label');
-  if (el) el.textContent = labels[p] || p;
-}
-
-async function saveSettings(): Promise<void> {
-  const selectVal = ($('settings-image-model') as HTMLSelectElement).value;
-  const imageModel = selectVal === '__custom__'
-    ? ($('settings-image-model-custom') as HTMLInputElement).value.trim() || 'dall-e-3'
-    : selectVal;
-  const updates: Partial<Settings> & Record<string, string> = {
-    llm_provider: ($('settings-provider') as HTMLSelectElement).value as Settings['llm_provider'],
-    llm_model: ($('settings-model') as HTMLInputElement).value,
-    llm_base_url: ($('settings-base-url') as HTMLInputElement).value,
-    image_model: imageModel,
-  };
-  const key = ($('settings-api-key') as HTMLInputElement).value;
-  if (key) updates.llm_api_key = key;
-  try {
-    await api.saveSettings(updates);
-    closeSettings();
-    showToast('Settings saved!');
-  } catch (err) {
-    showToast('Save failed: ' + (err as Error).message, 'error');
-  }
-}
-
 // ── Lightbox ──────────────────────────────────────────────────────────────────
-function toggleCustomImageModel(val: string): void {
-  $('custom-image-model-row').style.display = val === '__custom__' ? '' : 'none';
-  if (val === '__custom__') {
-    setTimeout(() => ($('settings-image-model-custom') as HTMLInputElement).focus(), 50);
-  }
-}
+
+
 
 function openLightbox(src: string, name: string): void {
   ($('lightbox-img') as HTMLImageElement).src = src;
@@ -1767,7 +1927,7 @@ function renderMarkdown(text: string): string {
           /<li>\s*<input([^>]*)type="checkbox"([^>]*)>([\s\S]*?)<\/li>/g,
           (_m: string, pre: string, post: string, content: string) => {
             const checked = (pre + post).includes('checked') ? 'data-checked="true"' : 'data-checked="false"';
-            return `<li data-type="taskItem" ${checked}><label><input type="checkbox" ${(pre+post).includes('checked') ? 'checked' : ''}><span>${content.trim()}</span></label></li>`;
+            return `<li data-type="taskItem" ${checked}><label><input type="checkbox" ${(pre + post).includes('checked') ? 'checked' : ''}><span>${content.trim()}</span></label></li>`;
           }
         );
         return `<ul data-type="taskList">${converted}</ul>`;

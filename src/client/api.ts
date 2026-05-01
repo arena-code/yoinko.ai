@@ -1,6 +1,6 @@
 // src/client/api.ts — Typed API client (multi-project aware)
 import type {
-  PageNode, Asset, Settings, LLMMessage, ChatMessage, Project,
+  PageNode, Asset, Settings, LLMMessage, ChatMessage, Project, LLMProfile,
   PagesResponse, PageResponse, AssetsResponse, AssetResponse,
   SettingsResponse, SuccessResponse, ProjectsResponse,
 } from '../shared/types.js';
@@ -90,6 +90,12 @@ export const api = {
   // ── Settings ───────────────────────────────────────────────────────────────
   getSettings: () => request<SettingsResponse>('GET', '/settings'),
   saveSettings: (data: Partial<Settings>) => request<SuccessResponse>('PUT', '/settings', data),
+
+  // ── LLM Profiles ───────────────────────────────────────────────────────────
+  getProfiles: () => request<{ profiles: (LLMProfile & { api_key_masked: string })[]; activeId: string }>('GET', '/settings/profiles'),
+  saveProfile: (profile: LLMProfile) => request<{ success: boolean; profile: LLMProfile }>('PUT', '/settings/profiles', profile),
+  deleteProfile: (id: string) => request<SuccessResponse>('DELETE', `/settings/profiles/${id}`),
+  setActiveProfile: (id: string) => request<SuccessResponse>('PUT', '/settings/profiles/active', { id }),
 
   // ── AI ─────────────────────────────────────────────────────────────────────
   generate: (data: AIGenerateParams) => request<{ content: string }>('POST', '/ai/generate', data),

@@ -6,6 +6,24 @@ function getSettings(dataDir) {
     const rows = db.prepare(`SELECT key, value FROM settings`).all();
     const s = {};
     rows.forEach((r) => { s[r.key] = r.value; });
+    // Try to read the active LLM profile (multi-profile mode)
+    try {
+        const profilesRaw = s.llm_profiles;
+        const activeId = s.llm_active_profile;
+        if (profilesRaw && activeId) {
+            const profiles = JSON.parse(profilesRaw);
+            const active = profiles.find(p => p.id === activeId);
+            if (active) {
+                // Overlay profile values onto settings
+                s.llm_provider = active.provider;
+                s.llm_model = active.model;
+                s.llm_api_key = active.api_key;
+                s.llm_base_url = active.base_url;
+                s.image_model = active.image_model;
+            }
+        }
+    }
+    catch { /* profile parse error — use legacy keys */ }
     return s;
 }
 // ── Text generation ───────────────────────────────────────────────────────────

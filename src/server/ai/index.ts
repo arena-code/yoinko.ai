@@ -1,13 +1,32 @@
 // src/server/ai/index.ts — Unified AI adapter
 // Supports: OpenAI, Google Gemini, Anthropic Claude, OpenAI-Compatible
 import { getGlobalDb } from '../db.js';
-import type { LLMMessage, AIOptions, ImageResult, Settings } from '../../shared/types.js';
+import type { LLMMessage, AIOptions, ImageResult, Settings, LLMProfile } from '../../shared/types.js';
 
 function getSettings(dataDir?: string): Settings {
   const db = getGlobalDb(dataDir);
   const rows = db.prepare<[], { key: string; value: string }>(`SELECT key, value FROM settings`).all();
   const s: Record<string, string> = {};
   rows.forEach((r: { key: string; value: string }) => { s[r.key] = r.value; });
+
+  // Try to read the active LLM profile (multi-profile mode)
+  try {
+    const profilesRaw = s.llm_profiles;
+    const activeId = s.llm_active_profile;
+    if (profilesRaw && activeId) {
+      const profiles = JSON.parse(profilesRaw) as LLMProfile[];
+      const active = profiles.find(p => p.id === activeId);
+      if (active) {
+        // Overlay profile values onto settings
+        s.llm_provider = active.provider;
+        s.llm_model = active.model;
+        s.llm_api_key = active.api_key;
+        s.llm_base_url = active.base_url;
+        s.image_model = active.image_model;
+      }
+    }
+  } catch { /* profile parse error — use legacy keys */ }
+
   return s as Settings;
 }
 
@@ -60,13 +79,24 @@ export async function* streamText(messages: LLMMessage[], opts: AIOptions = {}, 
 export async function generateImage(prompt: string, dataDir?: string): Promise<ImageResult> {
   const s = getSettings(dataDir);
   const key = s.llm_api_key ?? '';
-  const p = s.llm_provider ?? 'openai';
+  const provider = s.llm_provider ?? 'openai';
   const baseUrl = s.llm_base_url ?? '';
+  const imageModel = s.image_model || '';
 
-  if (p === 'gemini') {
-    return generateImageGemini(prompt, key);
+  switch (provider) {
+    case 'gemini':
+      return generateImageGemini(prompt, key, imageModel);
+
+    case 'claude':
+      throw new Error('Claude (Anthropic) does not support image generation. Switch to an OpenAI or Gemini profile, or use an OpenAI-compatible provider.');
+
+    case 'openai-compatible':
+      return generateImageOpenAI(prompt, key, imageModel || 'dall-e-3', baseUrl || null);
+
+    case 'openai':
+    default:
+      return generateImageOpenAI(prompt, key, imageModel || 'dall-e-3', null);
   }
-  return generateImageOpenAI(prompt, key, s.image_model ?? 'dall-e-3', baseUrl || null);
 }
 
 // ── OpenAI ────────────────────────────────────────────────────────────────────
@@ -90,14 +120,26 @@ async function* streamOpenAI(messages: LLMMessage[], apiKey: string, model: stri
 async function generateImageOpenAI(prompt: string, apiKey: string, model: string, baseUrl: string | null): Promise<ImageResult> {
   const { OpenAI } = await import('openai');
   const client = new OpenAI({ apiKey, ...(baseUrl ? { baseURL: baseUrl } : {}) });
-  const res = await client.images.generate({
+
+  const isDallE = model.startsWith('dall-e');
+  // DALL-E supports response_format, n, size; newer models (gpt-image-1) don't
+  const params: Record<string, unknown> = {
     model: model ?? 'dall-e-3',
     prompt,
-    n: 1,
-    size: '1024x1024',
-    response_format: 'url',
-  });
-  return { url: res.data?.[0]?.url ?? undefined, revised_prompt: res.data?.[0]?.revised_prompt ?? undefined };
+    ...(isDallE ? { n: 1, size: '1024x1024', response_format: 'url' as const } : { size: '1024x1024' }),
+  };
+
+  const res = await client.images.generate(params as Parameters<typeof client.images.generate>[0]);
+
+  // Newer models may return base64 in b64_json field
+  const item = res.data?.[0];
+  if (item?.url) {
+    return { url: item.url, revised_prompt: item.revised_prompt ?? undefined };
+  }
+  if (item?.b64_json) {
+    return { base64: item.b64_json, mimeType: 'image/png' };
+  }
+  throw new Error('OpenAI did not return an image');
 }
 
 // ── Google Gemini ─────────────────────────────────────────────────────────────
@@ -115,7 +157,7 @@ async function callGemini(messages: LLMMessage[], apiKey: string, model: string)
 
   const chat = m.startChat({
     history: chatHistory,
-    ...(systemParts ? { systemInstruction: systemParts } : {}),
+    ...(systemParts ? { systemInstruction: { role: 'user' as const, parts: [{ text: systemParts }] } } : {}),
   });
   const result = await chat.sendMessage(lastMsg);
   return result.response.text();
@@ -135,7 +177,7 @@ async function* streamGemini(messages: LLMMessage[], apiKey: string, model: stri
 
   const chat = m.startChat({
     history: chatHistory,
-    ...(systemParts ? { systemInstruction: systemParts } : {}),
+    ...(systemParts ? { systemInstruction: { role: 'user' as const, parts: [{ text: systemParts }] } } : {}),
   });
   const result = await chat.sendMessageStream(lastMsg);
   for await (const chunk of result.stream) {
@@ -144,20 +186,49 @@ async function* streamGemini(messages: LLMMessage[], apiKey: string, model: stri
   }
 }
 
-async function generateImageGemini(prompt: string, apiKey: string): Promise<ImageResult> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${apiKey}`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      instances: [{ prompt }],
-      parameters: { sampleCount: 1 },
-    }),
+async function generateImageGemini(prompt: string, apiKey: string, imageModel: string): Promise<ImageResult> {
+  const model = imageModel || 'gemini-2.0-flash-exp-image-generation';
+
+  // Legacy Imagen models use the REST predict API
+  if (model.startsWith('imagen')) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:predict?key=${apiKey}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        instances: [{ prompt }],
+        parameters: { sampleCount: 1 },
+      }),
+    });
+    const json = await res.json() as { error?: { message?: string }; predictions?: Array<{ bytesBase64Encoded?: string }> };
+    if (!res.ok) throw new Error(json.error?.message ?? 'Gemini Imagen generation failed');
+    const b64 = json.predictions?.[0]?.bytesBase64Encoded;
+    return { base64: b64, mimeType: 'image/png' };
+  }
+
+  // Gemini generative models (e.g. gemini-2.0-flash, gemini-3.1-flash-image-preview)
+  // use the standard generateContent API with responseModalities including "image"
+  const { GoogleGenerativeAI } = await import('@google/generative-ai');
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const m = genAI.getGenerativeModel({
+    model,
+    generationConfig: {
+      // @ts-expect-error — responseModalities is valid for image-capable models
+      responseModalities: ['TEXT', 'IMAGE'],
+    },
   });
-  const json = await res.json() as { error?: { message?: string }; predictions?: Array<{ bytesBase64Encoded?: string }> };
-  if (!res.ok) throw new Error(json.error?.message ?? 'Gemini image generation failed');
-  const b64 = json.predictions?.[0]?.bytesBase64Encoded;
-  return { base64: b64, mimeType: 'image/png' };
+
+  const result = await m.generateContent(prompt);
+  const parts = result.response.candidates?.[0]?.content?.parts ?? [];
+
+  for (const part of parts) {
+    if ((part as any).inlineData) {
+      const data = (part as any).inlineData;
+      return { base64: data.data, mimeType: data.mimeType || 'image/png' };
+    }
+  }
+
+  throw new Error('Gemini did not return an image. Make sure your model supports image generation.');
 }
 
 // ── Anthropic Claude ──────────────────────────────────────────────────────────
