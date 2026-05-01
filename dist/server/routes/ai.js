@@ -133,5 +133,19 @@ router.get('/chat/history', (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+// ── DELETE /api/ai/chat/history?page_id=:id ──────────────────────────────────
+router.delete('/chat/history', (req, res) => {
+    try {
+        const { page_id } = req.query;
+        if (!page_id)
+            return void res.status(400).json({ error: 'page_id is required' });
+        const db = getProjectDb(projectId(req), dataDir(req));
+        db.prepare(`DELETE FROM chat_messages WHERE page_id = ?`).run(page_id);
+        res.json({ ok: true });
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
 export default router;
 //# sourceMappingURL=ai.js.map

@@ -101,6 +101,7 @@ export const api = {
   generate: (data: AIGenerateParams) => request<{ content: string }>('POST', '/ai/generate', data),
   generateImg: (data: AIImageParams) => request<{ asset: Asset }>('POST', '/ai/image', data),
   getChatHistory: (pageId: string) => request<{ messages: ChatMessage[] }>('GET', `/ai/chat/history?page_id=${pageId}`),
+  deleteChatHistory: (pageId: string) => request<{ ok: boolean }>('DELETE', `/ai/chat/history?page_id=${pageId}`),
 
   // Streaming chat — Server-Sent Events via fetch
   async chatStream(

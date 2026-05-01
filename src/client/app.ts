@@ -1658,6 +1658,9 @@ async function sendChatMessage(): Promise<void> {
 function clearChat(): void {
   state.chatMessages = [];
   renderChatMessages();
+  if (state.currentPageId) {
+    api.deleteChatHistory(state.currentPageId).catch(() => {});
+  }
 }
 
 async function applyAiSuggestion(): Promise<void> {

@@ -53,6 +53,7 @@ var NotasApp = (() => {
     generate: (data) => request("POST", "/ai/generate", data),
     generateImg: (data) => request("POST", "/ai/image", data),
     getChatHistory: (pageId) => request("GET", `/ai/chat/history?page_id=${pageId}`),
+    deleteChatHistory: (pageId) => request("DELETE", `/ai/chat/history?page_id=${pageId}`),
     // Streaming chat — Server-Sent Events via fetch
     async chatStream(messages, pageId, pageContent, { onChunk, onDone, onError }) {
       try {
@@ -1477,6 +1478,10 @@ ${code}
   function clearChat() {
     state.chatMessages = [];
     renderChatMessages();
+    if (state.currentPageId) {
+      api.deleteChatHistory(state.currentPageId).catch(() => {
+      });
+    }
   }
   async function applyAiSuggestion() {
     if (!state.chatMessages.length || !state.currentPageId) return;
