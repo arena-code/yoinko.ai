@@ -129,7 +129,7 @@ async function generateImageOpenAI(prompt: string, apiKey: string, model: string
     ...(isDallE ? { n: 1, size: '1024x1024', response_format: 'url' as const } : { size: '1024x1024' }),
   };
 
-  const res = await client.images.generate(params as Parameters<typeof client.images.generate>[0]);
+  const res = await client.images.generate(params as unknown as Parameters<typeof client.images.generate>[0]);
 
   // Newer models may return base64 in b64_json field
   const item = res.data?.[0];

@@ -71,12 +71,20 @@ export async function* streamText(messages, opts = {}, dataDir) {
 export async function generateImage(prompt, dataDir) {
     const s = getSettings(dataDir);
     const key = s.llm_api_key ?? '';
-    const p = s.llm_provider ?? 'openai';
+    const provider = s.llm_provider ?? 'openai';
     const baseUrl = s.llm_base_url ?? '';
-    if (p === 'gemini') {
-        return generateImageGemini(prompt, key);
+    const imageModel = s.image_model || '';
+    switch (provider) {
+        case 'gemini':
+            return generateImageGemini(prompt, key, imageModel);
+        case 'claude':
+            throw new Error('Claude (Anthropic) does not support image generation. Switch to an OpenAI or Gemini profile, or use an OpenAI-compatible provider.');
+        case 'openai-compatible':
+            return generateImageOpenAI(prompt, key, imageModel || 'dall-e-3', baseUrl || null);
+        case 'openai':
+        default:
+            return generateImageOpenAI(prompt, key, imageModel || 'dall-e-3', null);
     }
-    return generateImageOpenAI(prompt, key, s.image_model ?? 'dall-e-3', baseUrl || null);
 }
 // ── OpenAI ────────────────────────────────────────────────────────────────────
 async function callOpenAI(messages, apiKey, model, baseUrl) {
@@ -98,14 +106,23 @@ async function* streamOpenAI(messages, apiKey, model, baseUrl) {
 async function generateImageOpenAI(prompt, apiKey, model, baseUrl) {
     const { OpenAI } = await import('openai');
     const client = new OpenAI({ apiKey, ...(baseUrl ? { baseURL: baseUrl } : {}) });
-    const res = await client.images.generate({
+    const isDallE = model.startsWith('dall-e');
+    // DALL-E supports response_format, n, size; newer models (gpt-image-1) don't
+    const params = {
         model: model ?? 'dall-e-3',
         prompt,
-        n: 1,
-        size: '1024x1024',
-        response_format: 'url',
-    });
-    return { url: res.data?.[0]?.url ?? undefined, revised_prompt: res.data?.[0]?.revised_prompt ?? undefined };
+        ...(isDallE ? { n: 1, size: '1024x1024', response_format: 'url' } : { size: '1024x1024' }),
+    };
+    const res = await client.images.generate(params);
+    // Newer models may return base64 in b64_json field
+    const item = res.data?.[0];
+    if (item?.url) {
+        return { url: item.url, revised_prompt: item.revised_prompt ?? undefined };
+    }
+    if (item?.b64_json) {
+        return { base64: item.b64_json, mimeType: 'image/png' };
+    }
+    throw new Error('OpenAI did not return an image');
 }
 // ── Google Gemini ─────────────────────────────────────────────────────────────
 async function callGemini(messages, apiKey, model) {
@@ -120,7 +137,7 @@ async function callGemini(messages, apiKey, model) {
     const lastMsg = messages.filter(x => x.role !== 'system').at(-1)?.content ?? '';
     const chat = m.startChat({
         history: chatHistory,
-        ...(systemParts ? { systemInstruction: systemParts } : {}),
+        ...(systemParts ? { systemInstruction: { role: 'user', parts: [{ text: systemParts }] } } : {}),
     });
     const result = await chat.sendMessage(lastMsg);
     return result.response.text();
@@ -137,7 +154,7 @@ async function* streamGemini(messages, apiKey, model) {
     const lastMsg = messages.filter(x => x.role !== 'system').at(-1)?.content ?? '';
     const chat = m.startChat({
         history: chatHistory,
-        ...(systemParts ? { systemInstruction: systemParts } : {}),
+        ...(systemParts ? { systemInstruction: { role: 'user', parts: [{ text: systemParts }] } } : {}),
     });
     const result = await chat.sendMessageStream(lastMsg);
     for await (const chunk of result.stream) {
@@ -146,21 +163,45 @@ async function* streamGemini(messages, apiKey, model) {
             yield text;
     }
 }
-async function generateImageGemini(prompt, apiKey) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${apiKey}`;
-    const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            instances: [{ prompt }],
-            parameters: { sampleCount: 1 },
-        }),
+async function generateImageGemini(prompt, apiKey, imageModel) {
+    const model = imageModel || 'gemini-2.0-flash-exp-image-generation';
+    // Legacy Imagen models use the REST predict API
+    if (model.startsWith('imagen')) {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:predict?key=${apiKey}`;
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                instances: [{ prompt }],
+                parameters: { sampleCount: 1 },
+            }),
+        });
+        const json = await res.json();
+        if (!res.ok)
+            throw new Error(json.error?.message ?? 'Gemini Imagen generation failed');
+        const b64 = json.predictions?.[0]?.bytesBase64Encoded;
+        return { base64: b64, mimeType: 'image/png' };
+    }
+    // Gemini generative models (e.g. gemini-2.0-flash, gemini-3.1-flash-image-preview)
+    // use the standard generateContent API with responseModalities including "image"
+    const { GoogleGenerativeAI } = await import('@google/generative-ai');
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const m = genAI.getGenerativeModel({
+        model,
+        generationConfig: {
+            // @ts-expect-error — responseModalities is valid for image-capable models
+            responseModalities: ['TEXT', 'IMAGE'],
+        },
     });
-    const json = await res.json();
-    if (!res.ok)
-        throw new Error(json.error?.message ?? 'Gemini image generation failed');
-    const b64 = json.predictions?.[0]?.bytesBase64Encoded;
-    return { base64: b64, mimeType: 'image/png' };
+    const result = await m.generateContent(prompt);
+    const parts = result.response.candidates?.[0]?.content?.parts ?? [];
+    for (const part of parts) {
+        if (part.inlineData) {
+            const data = part.inlineData;
+            return { base64: data.data, mimeType: data.mimeType || 'image/png' };
+        }
+    }
+    throw new Error('Gemini did not return an image. Make sure your model supports image generation.');
 }
 // ── Anthropic Claude ──────────────────────────────────────────────────────────
 async function callClaude(messages, apiKey, model) {

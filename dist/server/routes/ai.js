@@ -48,7 +48,7 @@ router.post('/chat', async (req, res) => {
     try {
         const systemMsg = {
             role: 'system',
-            content: `You are a helpful AI assistant embedded in yoınko, a knowledge base app. Be concise and helpful.${page_content ? `\n\nCurrent page content for context:\n${page_content.slice(0, 3000)}` : ''}`,
+            content: `You are a helpful AI assistant embedded in yoınko, a knowledge base app. Your name is Yoyo. Be concise and helpful.${page_content ? `\n\nCurrent page content for context:\n${page_content.slice(0, 3000)}` : ''}`,
         };
         const fullMessages = [systemMsg, ...messages];
         let fullReply = '';
