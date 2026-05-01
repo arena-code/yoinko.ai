@@ -147,6 +147,7 @@ var NotasApp = (() => {
     window.closeLightbox = closeLightbox;
     window.sendChatMessage = sendChatMessage;
     window.toggleChat = toggleChat;
+    window.toggleSidebar = toggleSidebar;
     window.switchProject = switchProject;
     window.openCreateProjectModal = openCreateProjectModal;
     window.closeCreateProjectModal = closeCreateProjectModal;
@@ -181,6 +182,9 @@ var NotasApp = (() => {
     };
     await loadSettings();
     applyTheme(state.theme);
+    if (localStorage.getItem("yk-sidebar-collapsed") === "1") {
+      $("sidebar").classList.add("collapsed");
+    }
     await loadProjects();
     await loadPages();
     setupEventListeners();
@@ -1379,6 +1383,11 @@ ${code}
     state.chatOpen = !state.chatOpen;
     $("chat-drawer").classList.toggle("open", state.chatOpen);
     if (state.chatOpen && state.currentPageId) loadChatHistory();
+  }
+  function toggleSidebar() {
+    const sidebar = $("sidebar");
+    const collapsed = sidebar.classList.toggle("collapsed");
+    localStorage.setItem("yk-sidebar-collapsed", collapsed ? "1" : "0");
   }
   async function loadChatHistory() {
     if (!state.currentPageId) return;

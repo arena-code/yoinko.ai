@@ -58,6 +58,7 @@ declare global {
     closeLightbox: () => void;
     sendChatMessage: () => void;
     toggleChat: () => void;
+    toggleSidebar: () => void;
     switchProject: (id: string) => void;
     openCreateProjectModal: () => void;
     closeCreateProjectModal: () => void;
@@ -160,6 +161,7 @@ async function init(): Promise<void> {
   window.closeLightbox = closeLightbox;
   window.sendChatMessage = sendChatMessage;
   window.toggleChat = toggleChat;
+  window.toggleSidebar = toggleSidebar;
   window.switchProject = switchProject;
   window.openCreateProjectModal = openCreateProjectModal;
   window.closeCreateProjectModal = closeCreateProjectModal;
@@ -194,6 +196,11 @@ async function init(): Promise<void> {
 
   await loadSettings();
   applyTheme(state.theme);
+
+  // Restore sidebar collapsed state
+  if (localStorage.getItem('yk-sidebar-collapsed') === '1') {
+    $('sidebar').classList.add('collapsed');
+  }
   await loadProjects();  // must happen before loadPages
   await loadPages();
   setupEventListeners();
@@ -1537,6 +1544,12 @@ function toggleChat(): void {
   state.chatOpen = !state.chatOpen;
   $('chat-drawer').classList.toggle('open', state.chatOpen);
   if (state.chatOpen && state.currentPageId) loadChatHistory();
+}
+
+function toggleSidebar(): void {
+  const sidebar = $('sidebar');
+  const collapsed = sidebar.classList.toggle('collapsed');
+  localStorage.setItem('yk-sidebar-collapsed', collapsed ? '1' : '0');
 }
 
 async function loadChatHistory(): Promise<void> {
