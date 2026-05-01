@@ -1567,12 +1567,34 @@ function renderChatMessages(): void {
 }
 
 function renderMarkdownSimple(text: string): string {
-  return text
-    .replace(/```[\s\S]*?```/g, m => `<pre style="background:var(--surface-3);padding:8px;border-radius:6px;font-size:12px;overflow-x:auto;margin:6px 0"><code>${esc(m.slice(3, -3).replace(/^[^\n]*\n/, ''))}</code></pre>`)
+  // 1. Extract code blocks before escaping so we can handle them separately
+  const codeBlocks: string[] = [];
+  const placeholder = '\x00CB\x00';
+  const withPlaceholders = text.replace(/```([\s\S]*?)```/g, (_match, code: string) => {
+    // Strip optional language tag from first line
+    const cleaned = code.replace(/^[^\n]*\n/, '');
+    codeBlocks.push(cleaned);
+    return placeholder;
+  });
+
+  // 2. Escape the entire remaining text (prevents HTML injection)
+  let safe = esc(withPlaceholders);
+
+  // 3. Apply inline markdown transforms on the escaped text
+  safe = safe
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/\n/g, '<br>');
+
+  // 4. Re-inject escaped code blocks
+  let i = 0;
+  safe = safe.replace(new RegExp(placeholder.replace(/\x00/g, '\\x00'), 'g'), () => {
+    const code = esc(codeBlocks[i++] ?? '');
+    return `<pre style="background:var(--surface-3);padding:8px;border-radius:6px;font-size:12px;overflow-x:auto;margin:6px 0"><code>${code}</code></pre>`;
+  });
+
+  return safe;
 }
 
 async function sendChatMessage(): Promise<void> {

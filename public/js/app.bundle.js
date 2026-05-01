@@ -1406,7 +1406,21 @@ ${code}
     container.scrollTop = container.scrollHeight;
   }
   function renderMarkdownSimple(text) {
-    return text.replace(/```[\s\S]*?```/g, (m) => `<pre style="background:var(--surface-3);padding:8px;border-radius:6px;font-size:12px;overflow-x:auto;margin:6px 0"><code>${esc(m.slice(3, -3).replace(/^[^\n]*\n/, ""))}</code></pre>`).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/\*(.+?)\*/g, "<em>$1</em>").replace(/\n/g, "<br>");
+    const codeBlocks = [];
+    const placeholder = "\0CB\0";
+    const withPlaceholders = text.replace(/```([\s\S]*?)```/g, (_match, code) => {
+      const cleaned = code.replace(/^[^\n]*\n/, "");
+      codeBlocks.push(cleaned);
+      return placeholder;
+    });
+    let safe = esc(withPlaceholders);
+    safe = safe.replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/\*(.+?)\*/g, "<em>$1</em>").replace(/\n/g, "<br>");
+    let i = 0;
+    safe = safe.replace(new RegExp(placeholder.replace(/\x00/g, "\\x00"), "g"), () => {
+      const code = esc(codeBlocks[i++] ?? "");
+      return `<pre style="background:var(--surface-3);padding:8px;border-radius:6px;font-size:12px;overflow-x:auto;margin:6px 0"><code>${code}</code></pre>`;
+    });
+    return safe;
   }
   async function sendChatMessage() {
     const input = $("chat-input");
