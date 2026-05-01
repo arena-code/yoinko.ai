@@ -65,6 +65,9 @@ declare global {
     submitCreateProject: () => void;
     deleteProjectConfirm: (id: string, name: string) => void;
     closeConfirmDeleteProject: (result: boolean) => void;
+    openRenameProjectModal: (id: string, name: string) => void;
+    closeRenameProjectModal: () => void;
+    submitRenameProject: () => void;
     toggleProjectMenu: () => void;
     cloudLogout: () => void;
   }

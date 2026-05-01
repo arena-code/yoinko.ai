@@ -2,13 +2,9 @@
 import express, { Request, Response } from 'express';
 import { getGlobalDb } from '../db.js';
 import type { Settings } from '../../shared/types.js';
+import { dataDir } from '../request-helpers.js';
 
 const router = express.Router();
-
-/** Get tenant data dir from request (set by cloud-auth middleware) */
-function dataDir(req: Request): string | undefined {
-  return (req as any).tenantDataDir;
-}
 
 // ── GET /api/settings ─────────────────────────────────────────────────────────
 router.get('/', (req: Request, res: Response) => {

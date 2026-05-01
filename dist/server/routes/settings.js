@@ -1,11 +1,8 @@
 // src/server/routes/settings.ts
 import express from 'express';
 import { getGlobalDb } from '../db.js';
+import { dataDir } from '../request-helpers.js';
 const router = express.Router();
-/** Get tenant data dir from request (set by cloud-auth middleware) */
-function dataDir(req) {
-    return req.tenantDataDir;
-}
 // ── GET /api/settings ─────────────────────────────────────────────────────────
 router.get('/', (req, res) => {
     try {

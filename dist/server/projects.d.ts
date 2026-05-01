@@ -1,9 +1,5 @@
+import type { Project } from '../shared/types.js';
 export declare const DATA_DIR: string;
-export interface Project {
-    id: string;
-    name: string;
-    created_at: string;
-}
 export declare function listProjects(dataDir?: string): Project[];
 export declare function getProject(id: string, dataDir?: string): Project | undefined;
 export declare function createProject(name: string, dataDir?: string): Project;

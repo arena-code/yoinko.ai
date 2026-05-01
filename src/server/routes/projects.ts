@@ -4,13 +4,9 @@ import {
   listProjects, createProject, renameProject, deleteProject,
 } from '../projects.js';
 import { evictProjectDb } from '../db.js';
+import { dataDir } from '../request-helpers.js';
 
 const router = express.Router();
-
-/** Get tenant data dir from request (set by cloud-auth middleware) */
-function dataDir(req: Request): string | undefined {
-  return (req as any).tenantDataDir;
-}
 
 // ── GET /api/projects ─────────────────────────────────────────────────────────
 router.get('/', (req: Request, res: Response) => {

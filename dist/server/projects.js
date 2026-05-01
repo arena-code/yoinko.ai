@@ -3,9 +3,9 @@
 // In self-hosted mode, DATA_DIR is a module-level constant (unchanged).
 import fs from 'fs';
 import path from 'path';
-import { STATIC_DATA_DIR, CLOUD_ENABLED } from './tenant-context.js';
+import { DEFAULT_DATA_DIR, CLOUD_ENABLED } from './tenant-context.js';
 // Self-hosted: use the static data dir
-export const DATA_DIR = STATIC_DATA_DIR;
+export const DATA_DIR = DEFAULT_DATA_DIR;
 // ── Registry helpers ──────────────────────────────────────────────────────────
 function registryPath(dataDir) {
     return path.join(dataDir, 'projects.json');

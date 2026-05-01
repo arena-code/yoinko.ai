@@ -6,7 +6,6 @@ import { DATA_DIR } from './projects.js';
  * In cloud mode: returns the tenant's global.db (from req.tenantDataDir)
  */
 export declare function getGlobalDb(dataDir?: string): Database.Database;
-export declare const globalDb: Database.Database;
 export declare function getProjectDb(projectId?: string, dataDir?: string): Database.Database;
 export { DATA_DIR };
 export declare function evictProjectDb(projectId: string, dataDir?: string): void;

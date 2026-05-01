@@ -9,17 +9,9 @@ import {
   toId, fromId,
 } from '../files.js';
 import type { PageNode, Asset } from '../../shared/types.js';
+import { projectId, dataDir } from '../request-helpers.js';
 
 const router = express.Router();
-
-function projectId(req: Request): string {
-  return (req.headers['x-project-id'] as string) || 'default';
-}
-
-/** Get tenant data dir from request (set by cloud-auth middleware) */
-function dataDir(req: Request): string | undefined {
-  return (req as any).tenantDataDir;
-}
 
 // ── GET /api/pages — full tree ────────────────────────────────────────────────
 router.get('/', (req: Request, res: Response) => {

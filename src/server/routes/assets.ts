@@ -7,18 +7,10 @@ import { v4 as uuidv4 } from 'uuid';
 import { getProjectDb } from '../db.js';
 import { getProjectDirs, listProjects } from '../projects.js';
 import type { Asset } from '../../shared/types.js';
+import { projectId, dataDir } from '../request-helpers.js';
 
 const router = express.Router();
 const now = () => new Date().toISOString();
-
-function projectId(req: Request): string {
-  return (req.headers['x-project-id'] as string) || 'default';
-}
-
-/** Get tenant data dir from request (set by cloud-auth middleware) */
-function dataDir(req: Request): string | undefined {
-  return (req as any).tenantDataDir;
-}
 
 // Dynamic multer storage — destination resolved per-request from X-Project-Id
 const storage = multer.diskStorage({

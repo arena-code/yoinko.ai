@@ -4,14 +4,8 @@ import path from 'path';
 import { getProjectDb } from '../db.js';
 import { getPagesDir } from '../files.js';
 import { scanDir, flattenTree, readPage, writePage, createPage, createFolder, deletePath, renamePath, toId, fromId, } from '../files.js';
+import { projectId, dataDir } from '../request-helpers.js';
 const router = express.Router();
-function projectId(req) {
-    return req.headers['x-project-id'] || 'default';
-}
-/** Get tenant data dir from request (set by cloud-auth middleware) */
-function dataDir(req) {
-    return req.tenantDataDir;
-}
 // ── GET /api/pages — full tree ────────────────────────────────────────────────
 router.get('/', (req, res) => {
     try {

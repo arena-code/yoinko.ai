@@ -6,15 +6,9 @@ import fs from 'fs';
 import { getProjectDb } from '../db.js';
 import { getProjectDirs } from '../projects.js';
 import { generateText, streamText, generateImage } from '../ai/index.js';
+import { projectId, dataDir } from '../request-helpers.js';
 const router = express.Router();
 const now = () => new Date().toISOString();
-function projectId(req) {
-    return req.headers['x-project-id'] || 'default';
-}
-/** Get tenant data dir from request (set by cloud-auth middleware) */
-function dataDir(req) {
-    return req.tenantDataDir;
-}
 // ── POST /api/ai/generate — one-shot content generation ──────────────────────
 router.post('/generate', async (req, res) => {
     try {
@@ -29,7 +23,7 @@ router.post('/generate', async (req, res) => {
             ...(context ? [{ role: 'system', content: `Current page context:\n${context}` }] : []),
             { role: 'user', content: prompt },
         ];
-        const content = await generateText(messages);
+        const content = await generateText(messages, {}, dataDir(req));
         res.json({ content });
     }
     catch (err) {
@@ -58,7 +52,7 @@ router.post('/chat', async (req, res) => {
         };
         const fullMessages = [systemMsg, ...messages];
         let fullReply = '';
-        for await (const chunk of streamText(fullMessages)) {
+        for await (const chunk of streamText(fullMessages, {}, dataDir(req))) {
             fullReply += chunk;
             send({ type: 'chunk', text: chunk });
         }
@@ -92,7 +86,7 @@ router.post('/image', async (req, res) => {
         const db = getProjectDb(pid, dd);
         const { uploadsDir } = getProjectDirs(pid, dd);
         fs.mkdirSync(uploadsDir, { recursive: true });
-        const result = await generateImage(prompt);
+        const result = await generateImage(prompt, dd);
         // If we get a URL (OpenAI), download and save it
         if (result.url) {
             const resp = await fetch(result.url);

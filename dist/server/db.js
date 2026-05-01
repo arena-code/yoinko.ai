@@ -53,8 +53,6 @@ export function getGlobalDb(dataDir) {
     }
     return globalDbCache.get(dataDir);
 }
-// Legacy export for backward compatibility
-export const globalDb = getSelfHostedGlobalDb();
 // ── Per-project DB cache ──────────────────────────────────────────────────────
 const projectDbCache = new Map();
 function createProjectDb(dbPath) {
@@ -95,8 +93,6 @@ export function getProjectDb(projectId = 'default', dataDir) {
     projectDbCache.set(cacheKey, db);
     return db;
 }
-// Backwards compat: used by routes before they were project-aware
-// (settings route still uses globalDb directly)
 export { DATA_DIR };
 // Helper to invalidate cache if a project is deleted
 export function evictProjectDb(projectId, dataDir) {

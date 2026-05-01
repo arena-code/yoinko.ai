@@ -1,15 +1,16 @@
 // src/server/ai/index.ts — Unified AI adapter
 // Supports: OpenAI, Google Gemini, Anthropic Claude, OpenAI-Compatible
-import { globalDb as db } from '../db.js';
-function getSettings() {
+import { getGlobalDb } from '../db.js';
+function getSettings(dataDir) {
+    const db = getGlobalDb(dataDir);
     const rows = db.prepare(`SELECT key, value FROM settings`).all();
     const s = {};
     rows.forEach((r) => { s[r.key] = r.value; });
     return s;
 }
 // ── Text generation ───────────────────────────────────────────────────────────
-export async function generateText(messages, opts = {}) {
-    const s = getSettings();
+export async function generateText(messages, opts = {}, dataDir) {
+    const s = getSettings(dataDir);
     const p = opts.provider ?? s.llm_provider ?? 'openai';
     const key = opts.apiKey ?? s.llm_api_key ?? '';
     const m = opts.model ?? s.llm_model ?? 'gpt-4o-mini';
@@ -27,8 +28,8 @@ export async function generateText(messages, opts = {}) {
     }
 }
 // ── Streaming text generation ─────────────────────────────────────────────────
-export async function* streamText(messages, opts = {}) {
-    const s = getSettings();
+export async function* streamText(messages, opts = {}, dataDir) {
+    const s = getSettings(dataDir);
     const p = opts.provider ?? s.llm_provider ?? 'openai';
     const key = opts.apiKey ?? s.llm_api_key ?? '';
     const m = opts.model ?? s.llm_model ?? 'gpt-4o-mini';
@@ -49,8 +50,8 @@ export async function* streamText(messages, opts = {}) {
     }
 }
 // ── Image generation ──────────────────────────────────────────────────────────
-export async function generateImage(prompt) {
-    const s = getSettings();
+export async function generateImage(prompt, dataDir) {
+    const s = getSettings(dataDir);
     const key = s.llm_api_key ?? '';
     const p = s.llm_provider ?? 'openai';
     const baseUrl = s.llm_base_url ?? '';

@@ -60,8 +60,7 @@ export function getGlobalDb(dataDir?: string): Database.Database {
   return globalDbCache.get(dataDir)!;
 }
 
-// Legacy export for backward compatibility
-export const globalDb: Database.Database = getSelfHostedGlobalDb();
+
 
 // ── Per-project DB cache ──────────────────────────────────────────────────────
 const projectDbCache = new Map<string, Database.Database>();
@@ -108,8 +107,7 @@ export function getProjectDb(projectId: string = 'default', dataDir?: string): D
   return db;
 }
 
-// Backwards compat: used by routes before they were project-aware
-// (settings route still uses globalDb directly)
+
 export { DATA_DIR };
 
 // Helper to invalidate cache if a project is deleted

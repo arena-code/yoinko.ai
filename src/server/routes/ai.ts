@@ -7,18 +7,10 @@ import { getProjectDb } from '../db.js';
 import { getProjectDirs } from '../projects.js';
 import { generateText, streamText, generateImage } from '../ai/index.js';
 import type { LLMMessage, ChatMessage } from '../../shared/types.js';
+import { projectId, dataDir } from '../request-helpers.js';
 
 const router = express.Router();
 const now = () => new Date().toISOString();
-
-function projectId(req: Request): string {
-  return (req.headers['x-project-id'] as string) || 'default';
-}
-
-/** Get tenant data dir from request (set by cloud-auth middleware) */
-function dataDir(req: Request): string | undefined {
-  return (req as any).tenantDataDir;
-}
 
 // ── POST /api/ai/generate — one-shot content generation ──────────────────────
 router.post('/generate', async (req: Request, res: Response) => {
@@ -40,7 +32,7 @@ router.post('/generate', async (req: Request, res: Response) => {
       { role: 'user', content: prompt },
     ];
 
-    const content = await generateText(messages);
+    const content = await generateText(messages, {}, dataDir(req));
     res.json({ content });
   } catch (err) {
     console.error('AI generate error:', (err as Error).message);
@@ -79,7 +71,7 @@ router.post('/chat', async (req: Request, res: Response) => {
     const fullMessages: LLMMessage[] = [systemMsg, ...messages];
     let fullReply = '';
 
-    for await (const chunk of streamText(fullMessages)) {
+    for await (const chunk of streamText(fullMessages, {}, dataDir(req))) {
       fullReply += chunk;
       send({ type: 'chunk', text: chunk });
     }
@@ -116,7 +108,7 @@ router.post('/image', async (req: Request, res: Response) => {
     const { uploadsDir } = getProjectDirs(pid, dd);
     fs.mkdirSync(uploadsDir, { recursive: true });
 
-    const result = await generateImage(prompt);
+    const result = await generateImage(prompt, dd);
 
     // If we get a URL (OpenAI), download and save it
     if (result.url) {

@@ -1,9 +1,10 @@
 // src/server/ai/index.ts — Unified AI adapter
 // Supports: OpenAI, Google Gemini, Anthropic Claude, OpenAI-Compatible
-import { globalDb as db } from '../db.js';
+import { getGlobalDb } from '../db.js';
 import type { LLMMessage, AIOptions, ImageResult, Settings } from '../../shared/types.js';
 
-function getSettings(): Settings {
+function getSettings(dataDir?: string): Settings {
+  const db = getGlobalDb(dataDir);
   const rows = db.prepare<[], { key: string; value: string }>(`SELECT key, value FROM settings`).all();
   const s: Record<string, string> = {};
   rows.forEach((r: { key: string; value: string }) => { s[r.key] = r.value; });
@@ -11,8 +12,8 @@ function getSettings(): Settings {
 }
 
 // ── Text generation ───────────────────────────────────────────────────────────
-export async function generateText(messages: LLMMessage[], opts: AIOptions = {}): Promise<string> {
-  const s = getSettings();
+export async function generateText(messages: LLMMessage[], opts: AIOptions = {}, dataDir?: string): Promise<string> {
+  const s = getSettings(dataDir);
   const p = opts.provider ?? s.llm_provider ?? 'openai';
   const key = opts.apiKey ?? s.llm_api_key ?? '';
   const m = opts.model ?? s.llm_model ?? 'gpt-4o-mini';
@@ -32,8 +33,8 @@ export async function generateText(messages: LLMMessage[], opts: AIOptions = {})
 }
 
 // ── Streaming text generation ─────────────────────────────────────────────────
-export async function* streamText(messages: LLMMessage[], opts: AIOptions = {}): AsyncGenerator<string> {
-  const s = getSettings();
+export async function* streamText(messages: LLMMessage[], opts: AIOptions = {}, dataDir?: string): AsyncGenerator<string> {
+  const s = getSettings(dataDir);
   const p = opts.provider ?? s.llm_provider ?? 'openai';
   const key = opts.apiKey ?? s.llm_api_key ?? '';
   const m = opts.model ?? s.llm_model ?? 'gpt-4o-mini';
@@ -56,8 +57,8 @@ export async function* streamText(messages: LLMMessage[], opts: AIOptions = {}):
 }
 
 // ── Image generation ──────────────────────────────────────────────────────────
-export async function generateImage(prompt: string): Promise<ImageResult> {
-  const s = getSettings();
+export async function generateImage(prompt: string, dataDir?: string): Promise<ImageResult> {
+  const s = getSettings(dataDir);
   const key = s.llm_api_key ?? '';
   const p = s.llm_provider ?? 'openai';
   const baseUrl = s.llm_base_url ?? '';
