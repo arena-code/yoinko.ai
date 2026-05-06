@@ -3287,3 +3287,478 @@ body {
   background: color-mix(in srgb, var(--danger) 15%, transparent);
   color: var(--danger);
 }
+
+/* ══════════════════════════════════════════════════════════════
+   EDITOR TOOLBAR
+   ══════════════════════════════════════════════════════════════ */
+
+.editor-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1px;
+  justify-content: center;
+  padding: 5px 10px;
+  background: linear-gradient(180deg, var(--butter) 10%, white 120%);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1.5px solid var(--border);
+  margin: -32px -48px 28px;
+  box-shadow: 0 3px 5px rgba(26, 26, 46, 0.15);
+  user-select: none;
+}
+
+/* ── Buttons ── */
+.tb-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  transition:
+    background 0.1s ease,
+    color 0.1s ease,
+    transform 0.08s ease;
+  flex-shrink: 0;
+  outline: none;
+}
+
+.tb-btn i[data-lucide],
+.tb-btn i[data-lucide] svg,
+.tb-btn svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+  pointer-events: none;
+  flex-shrink: 0;
+}
+
+.tb-btn i[data-lucide] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Caret inside heading dropdown */
+.tb-caret[data-lucide],
+.tb-caret[data-lucide] svg,
+.tb-caret svg {
+  width: 13px !important;
+  height: 13px !important;
+  opacity: 0.5;
+}
+
+.tb-btn:hover {
+  background: var(--butter);
+  color: var(--ink);
+}
+
+.tb-btn:active {
+  transform: scale(0.92);
+}
+
+.tb-btn.active {
+  background: var(--accent-dim);
+  color: var(--tomato);
+}
+
+.tb-btn.active:hover {
+  background: rgba(255, 90, 54, 0.18);
+}
+
+/* ── Heading dropdown button ── */
+.tb-dropdown-btn {
+  width: auto;
+  min-width: 56px;
+  padding: 0 8px;
+  gap: 4px;
+  font-family: "Fredoka", sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tb-heading-label {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  color: inherit;
+  min-width: 28px;
+  text-align: center;
+}
+
+.tb-caret,
+.tb-caret svg {
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+  pointer-events: none;
+}
+
+.tb-dropdown-btn[aria-expanded="true"] .tb-caret,
+.tb-dropdown-btn[aria-expanded="true"] .tb-caret svg {
+  transform: rotate(180deg);
+}
+
+/* ── Separator ── */
+.tb-sep {
+  width: 1.2px;
+  height: 22px;
+  background: var(--ink-dim);
+  margin: 0 8px;
+  flex-shrink: 0;
+  align-self: center;
+  opacity: 0.35;
+  border-radius: 1px;
+}
+
+/* ── Dropdown container ── */
+.tb-dropdown {
+  position: relative;
+  display: inline-flex;
+}
+
+/* ── Dropdown panels ── */
+.tb-dropdown-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 190px;
+  background: #fff;
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow:
+    0 8px 24px rgba(26, 26, 46, 0.14),
+    3px 3px 0 var(--ink);
+  padding: 5px;
+  z-index: 500;
+}
+
+.tb-dropdown-menu.open {
+  display: block;
+  animation: tb-pop 0.12s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes tb-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ── Heading menu items ── */
+.tb-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  text-align: left;
+  font-family: "Fredoka", sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 0.1s;
+  white-space: nowrap;
+}
+
+.tb-menu-item:hover {
+  background: var(--butter);
+}
+
+.tb-menu-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 22px;
+  padding: 0 5px;
+  background: var(--surface-3);
+  border: 1.5px solid var(--border-strong);
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: -0.01em;
+  flex-shrink: 0;
+}
+
+.tb-menu-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 2px;
+  opacity: 0.7;
+}
+
+/* ── Link panel ── */
+.tb-link-menu {
+  min-width: 300px;
+  padding: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  overflow: hidden;
+}
+
+/* ── Tabs ── */
+.tb-link-tabs {
+  display: flex;
+  border-bottom: 1.5px solid var(--border);
+  background: var(--surface-2);
+}
+
+.tb-link-tab {
+  flex: 1;
+  padding: 8px 0;
+  background: transparent;
+  border: none;
+  font-family: "Fredoka", sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition:
+    color 0.12s,
+    background 0.12s;
+  position: relative;
+}
+
+.tb-link-tab:first-child {
+  border-radius: var(--radius-sm) 0 0 0;
+}
+
+.tb-link-tab:last-child {
+  border-radius: 0 var(--radius-sm) 0 0;
+}
+
+.tb-link-tab::after {
+  content: "";
+  position: absolute;
+  bottom: -1.5px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--tomato);
+  transform: scaleX(0);
+  transition: transform 0.15s ease;
+  border-radius: 2px 2px 0 0;
+}
+
+.tb-link-tab.active {
+  color: var(--tomato);
+  background: white;
+}
+
+.tb-link-tab.active::after {
+  transform: scaleX(1);
+}
+
+.tb-link-tab:hover:not(.active) {
+  color: var(--ink);
+  background: var(--butter);
+}
+
+/* ── Panel containers ── */
+.tb-link-panel {
+  padding: 12px;
+}
+
+.tb-link-panel.hidden {
+  display: none;
+}
+
+/* ── Page picker panel ── */
+.tb-page-list {
+  margin-top: 8px;
+  max-height: 210px;
+  overflow-y: auto;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.tb-page-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 10px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s;
+  color: var(--ink);
+}
+
+.tb-page-item:last-child {
+  border-bottom: none;
+}
+
+/* Indent guide: a vertical line at each depth level */
+.tb-page-indent {
+  display: inline-block;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.tb-page-indent::before {
+  content: "";
+  position: absolute;
+  top: -8px;
+  bottom: -8px;
+  left: 6px;
+  width: 1px;
+  background: var(--border);
+  border-radius: 1px;
+}
+
+.tb-page-item:hover {
+  background: var(--butter);
+}
+
+.tb-page-item i[data-lucide],
+.tb-page-item i[data-lucide] svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+/* Folder icon gets an amber tint to distinguish from pages */
+.tb-page-item[data-type="folder"] i[data-lucide],
+.tb-page-item[data-type="folder"] i[data-lucide] svg {
+  color: #e0a020;
+}
+
+.tb-page-item[data-type="folder"] .tb-page-item-name {
+  color: var(--ink);
+}
+
+.tb-page-item-label {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.tb-page-item-name {
+  font-family: "Fredoka", sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tb-page-item-path {
+  font-family: "Fredoka", sans-serif;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tb-page-empty {
+  padding: 16px;
+  text-align: center;
+  font-family: "Fredoka", sans-serif;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+/* ── Link label (URL tab) ── */
+.tb-link-label {
+  display: none; /* label replaced by tabs */
+}
+
+.tb-link-input {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font-family: "Fredoka", sans-serif;
+  font-size: 14px;
+  color: var(--ink);
+  background: var(--surface-2);
+  outline: none;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+
+.tb-link-input:focus {
+  border-color: var(--tomato);
+  background: white;
+  box-shadow: 0 0 0 3px rgba(255, 90, 54, 0.1);
+}
+
+.tb-link-actions {
+  display: flex;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.tb-link-ok,
+.tb-link-remove {
+  flex: 1;
+  padding: 7px 0;
+  border-radius: var(--radius-sm);
+  font-family: "Fredoka", sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1.5px solid transparent;
+  transition: all 0.12s;
+  text-align: center;
+}
+
+.tb-link-ok {
+  background: var(--tomato);
+  color: white;
+  border-color: var(--ink);
+  box-shadow: 2px 2px 0 var(--ink);
+}
+
+.tb-link-ok:hover {
+  background: var(--tomato-dark);
+  transform: translate(-1px, -1px);
+  box-shadow: 3px 3px 0 var(--ink);
+}
+
+.tb-link-remove {
+  background: white;
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.tb-link-remove:hover {
+  background: var(--danger-bg);
+}
+
+/* ── Hint bar spacing ── */
+.wysiwyg-page .tiptap-hint {
+  margin-top: 25px;
+}

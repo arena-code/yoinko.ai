@@ -8,3 +8,6 @@ export { Table } from '@tiptap/extension-table';
 export { TableRow } from '@tiptap/extension-table-row';
 export { TableCell } from '@tiptap/extension-table-cell';
 export { TableHeader } from '@tiptap/extension-table-header';
+export { Underline } from '@tiptap/extension-underline';
+export { Link } from '@tiptap/extension-link';
+export { ListKeymap } from '@tiptap/extension-list-keymap';

@@ -24,6 +24,8 @@ var TipTapBundle = (() => {
     Editor: () => Editor,
     Extension: () => Extension,
     InputRule: () => InputRule,
+    Link: () => Link,
+    ListKeymap: () => ListKeymap,
     Placeholder: () => Placeholder,
     StarterKit: () => StarterKit,
     Table: () => Table,
@@ -31,7 +33,8 @@ var TipTapBundle = (() => {
     TableHeader: () => TableHeader,
     TableRow: () => TableRow,
     TaskItem: () => TaskItem,
-    TaskList: () => TaskList
+    TaskList: () => TaskList,
+    Underline: () => Underline
   });
 
   // node_modules/orderedmap/dist/index.js

@@ -2,12 +2,41 @@
 import { api, getCurrentProjectId, setCurrentProjectId } from './api.js';
 import type { PageNode, Asset, Settings, LLMMessage, Project, LLMProfile } from '../shared/types.js';
 
+// ── TipTap editor instance type ───────────────────────────────────────────────
+interface TipTapChain {
+  focus: () => TipTapChain;
+  toggleBold: () => TipTapChain;
+  toggleItalic: () => TipTapChain;
+  toggleUnderline: () => TipTapChain;
+  toggleStrike: () => TipTapChain;
+  toggleCode: () => TipTapChain;
+  toggleBlockquote: () => TipTapChain;
+  toggleCodeBlock: () => TipTapChain;
+  toggleBulletList: () => TipTapChain;
+  toggleOrderedList: () => TipTapChain;
+  toggleTaskList: () => TipTapChain;
+  toggleHeading: (opts: { level: number }) => TipTapChain;
+  setHorizontalRule: () => TipTapChain;
+  setLink: (attrs: { href: string; target?: string }) => TipTapChain;
+  unsetLink: () => TipTapChain;
+  undo: () => TipTapChain;
+  redo: () => TipTapChain;
+  run: () => void;
+}
+
+interface TipTapEditor {
+  getJSON: () => TipTapDoc;
+  destroy: () => void;
+  chain: () => TipTapChain;
+  isActive: (name: string, attrs?: Record<string, unknown>) => boolean;
+  on: (event: string, cb: (props: { editor: TipTapEditor }) => void) => void;
+  off: (event: string, cb: unknown) => void;
+  can: () => TipTapChain & { run: () => boolean };
+}
+
 // ── TipTap bundle type declaration ────────────────────────────────────────────
 interface TipTapBundle {
-  Editor: new (opts: Record<string, unknown>) => {
-    getJSON: () => TipTapDoc;
-    destroy: () => void;
-  };
+  Editor: new (opts: Record<string, unknown>) => TipTapEditor;
   Extension: { create: (opts: Record<string, unknown>) => unknown };
   InputRule: new (opts: Record<string, unknown>) => unknown;
   StarterKit: unknown;
@@ -18,6 +47,9 @@ interface TipTapBundle {
   TableRow: unknown;
   TableCell: unknown;
   TableHeader: unknown;
+  Underline: unknown;
+  Link: { configure: (opts: Record<string, unknown>) => unknown };
+  ListKeymap: unknown;
 }
 
 interface TipTapDoc {
@@ -97,7 +129,7 @@ interface AppState {
   chatStreaming: boolean;
   expandedFolders: Set<string>;
   settings: Partial<Settings>;
-  wysiwyg: { getJSON: () => TipTapDoc; destroy: () => void } | null;
+  wysiwyg: TipTapEditor | null;
   previewMode?: boolean;
   editMode?: boolean;
 }
@@ -713,6 +745,7 @@ function tiptapToMarkdown(doc: TipTapDoc): string {
           else if (m.type === 'italic') t = `*${t}*`;
           else if (m.type === 'strike') t = `~~${t}~~`;
           else if (m.type === 'code') t = `\`${t}\``;
+          else if (m.type === 'underline') t = `<u>${t}</u>`;
           else if (m.type === 'link') t = `[${t}](${(m.attrs?.href as string) || ''})`;
         });
       }
@@ -743,8 +776,16 @@ function tiptapToMarkdown(doc: TipTapDoc): string {
       return c.map(n => {
         const checked = n.attrs?.checked;
         const checkbox = checked ? '[x]' : '[ ]';
-        const content = (n.content || []).map(n2 => block(n2, '')).join('').trimEnd();
-        return `- ${checkbox} ${content}\n`;
+        // First child is the paragraph with the task text; remaining are nested lists
+        const children = n.content || [];
+        const first = children[0];
+        const textPart = first
+          ? (first.type === 'paragraph' ? inline(first.content).trimEnd() : block(first, '').trimEnd())
+          : '';
+        const nestedParts = children.slice(1).map(n2 =>
+          block(n2, '').replace(/^(.)/gm, '  $1')
+        ).join('');
+        return `- ${checkbox} ${textPart}\n${nestedParts}`;
       }).join('');
     }
     if (t === 'listItem' || t === 'taskItem') {
@@ -756,7 +797,8 @@ function tiptapToMarkdown(doc: TipTapDoc): string {
         }
         return block(n, '').trimEnd();
       });
-      return indent + parts.join('\n').trimEnd() + '\n';
+      // Use '' as separator — each block already ends with \n
+      return indent + parts.join('\n') + '\n';
     }
     if (t === 'hardBreak') return '  \n';
     if (t === 'text') return node.text || '';
@@ -792,6 +834,108 @@ function renderWysiwygEditor(page: PageNode, container: HTMLElement): void {
   container.className = 'content-area wysiwyg-wrap fade-in';
   container.innerHTML = `
     <div class="wysiwyg-page">
+      <div class="editor-toolbar" id="editor-toolbar" role="toolbar" aria-label="Formatting">
+
+        <!-- History -->
+        <button class="tb-btn" id="tb-undo" title="Undo (⌘Z)">
+          <i data-lucide="undo-2"></i>
+        </button>
+        <button class="tb-btn" id="tb-redo" title="Redo (⌘⇧Z)">
+          <i data-lucide="redo-2"></i>
+        </button>
+
+        <span class="tb-sep"></span>
+
+        <!-- Heading dropdown -->
+        <div class="tb-dropdown" id="tb-heading-wrap">
+          <button class="tb-btn tb-dropdown-btn" id="tb-heading" title="Text style">
+            <span class="tb-heading-label" id="tb-heading-label">Text</span>
+            <i data-lucide="chevron-down" class="tb-caret"></i>
+          </button>
+          <div class="tb-dropdown-menu" id="tb-heading-menu">
+            <button class="tb-menu-item" data-level="1"><span class="tb-menu-badge">H1</span>Heading 1</button>
+            <button class="tb-menu-item" data-level="2"><span class="tb-menu-badge">H2</span>Heading 2</button>
+            <button class="tb-menu-item" data-level="3"><span class="tb-menu-badge">H3</span>Heading 3</button>
+            <button class="tb-menu-item" data-level="4"><span class="tb-menu-badge">H4</span>Heading 4</button>
+            <div class="tb-menu-divider"></div>
+            <button class="tb-menu-item" data-level="0"><span class="tb-menu-badge">¶</span>Normal</button>
+          </div>
+        </div>
+
+        <span class="tb-sep"></span>
+
+        <!-- Inline marks -->
+        <button class="tb-btn" id="tb-bold" title="Bold (⌘B)">
+          <i data-lucide="bold"></i>
+        </button>
+        <button class="tb-btn" id="tb-italic" title="Italic (⌘I)">
+          <i data-lucide="italic"></i>
+        </button>
+        <button class="tb-btn" id="tb-underline" title="Underline (⌘U)">
+          <i data-lucide="underline"></i>
+        </button>
+        <button class="tb-btn" id="tb-strike" title="Strikethrough">
+          <i data-lucide="strikethrough"></i>
+        </button>
+        <button class="tb-btn" id="tb-code" title="Inline code">
+          <i data-lucide="code"></i>
+        </button>
+
+        <span class="tb-sep"></span>
+
+        <!-- Block nodes -->
+        <button class="tb-btn" id="tb-bullet" title="Bullet list">
+          <i data-lucide="list"></i>
+        </button>
+        <button class="tb-btn" id="tb-ordered" title="Numbered list">
+          <i data-lucide="list-ordered"></i>
+        </button>
+        <button class="tb-btn" id="tb-task" title="Task list">
+          <i data-lucide="list-checks"></i>
+        </button>
+        <button class="tb-btn" id="tb-blockquote" title="Blockquote">
+          <i data-lucide="quote"></i>
+        </button>
+        <button class="tb-btn" id="tb-codeblock" title="Code block">
+          <i data-lucide="terminal-square"></i>
+        </button>
+
+        <span class="tb-sep"></span>
+
+        <!-- Link -->
+        <div class="tb-dropdown" id="tb-link-wrap">
+          <button class="tb-btn" id="tb-link" title="Link (⌘K)">
+            <i data-lucide="link"></i>
+          </button>
+          <div class="tb-dropdown-menu tb-link-menu" id="tb-link-menu">
+            <!-- Tabs -->
+            <div class="tb-link-tabs">
+              <button class="tb-link-tab active" id="tb-tab-url" data-tab="url">URL</button>
+              <button class="tb-link-tab" id="tb-tab-page" data-tab="page">Page</button>
+            </div>
+
+            <!-- URL panel -->
+            <div class="tb-link-panel" id="tb-panel-url">
+              <input class="tb-link-input" id="tb-link-input" type="url" placeholder="https://…" autocomplete="off" spellcheck="false" />
+              <div class="tb-link-actions">
+                <button class="tb-link-ok" id="tb-link-ok">Apply</button>
+                <button class="tb-link-remove" id="tb-link-remove">Remove</button>
+              </div>
+            </div>
+
+            <!-- Page picker panel -->
+            <div class="tb-link-panel hidden" id="tb-panel-page">
+              <input class="tb-link-input" id="tb-page-search" type="text" placeholder="Search pages…" autocomplete="off" spellcheck="false" />
+              <div class="tb-page-list" id="tb-page-list"></div>
+            </div>
+          </div>
+        </div>
+
+        <button class="tb-btn" id="tb-hr" title="Horizontal rule">
+          <i data-lucide="minus"></i>
+        </button>
+
+      </div>
       <div id="wysiwyg-editor" class="tiptap-host" spellcheck="true"></div>
       <div class="tiptap-hint">
         <span><kbd>**</kbd> bold</span>
@@ -799,10 +943,10 @@ function renderWysiwygEditor(page: PageNode, container: HTMLElement): void {
         <span><kbd># </kbd> heading</span>
         <span><kbd>- </kbd> list</span>
         <span><kbd>[] </kbd> task</span>
-        <span><kbd>&gt; </kbd> quote</span>
+        <span><kbd>> </kbd> quote</span>
         <span><kbd>\`\`\` </kbd> code</span>
       </div>
-      ${renderAssetsSection(page)}
+            ${renderAssetsSection(page)}
       ${renderUploadZone(page.id)}
     </div>
   `;
@@ -819,7 +963,7 @@ function renderWysiwygEditor(page: PageNode, container: HTMLElement): void {
     return;
   }
 
-  const { Editor, Extension, InputRule, StarterKit, TaskList, TaskItem, Placeholder, Table, TableRow, TableCell, TableHeader } = window.TipTapBundle;
+  const { Editor, Extension, InputRule, StarterKit, TaskList, TaskItem, Placeholder, Table, TableRow, TableCell, TableHeader, Underline, Link, ListKeymap } = window.TipTapBundle;
 
   const TaskBracketRule = Extension.create({
     name: 'taskBracketRule',
@@ -850,6 +994,13 @@ function renderWysiwygEditor(page: PageNode, container: HTMLElement): void {
       TableRow,
       TableCell,
       TableHeader,
+      Underline,
+      (Link as { configure: (opts: Record<string, unknown>) => unknown }).configure({
+        openOnClick: false,
+        validate: () => true,
+        HTMLAttributes: { rel: 'noopener noreferrer' },
+      }),
+      ListKeymap,
       Placeholder.configure({
         placeholder: 'Start writing… Use # for headings, [] for tasks, - for lists',
       }),
@@ -868,6 +1019,9 @@ function renderWysiwygEditor(page: PageNode, container: HTMLElement): void {
 
   state.wysiwyg = editor;
 
+  // Wire up toolbar
+  buildEditorToolbar(editor);
+
   $('wysiwyg-editor').addEventListener('keydown', (e: Event) => {
     const ke = e as KeyboardEvent;
     if ((ke.metaKey || ke.ctrlKey) && ke.key === 's') {
@@ -876,6 +1030,291 @@ function renderWysiwygEditor(page: PageNode, container: HTMLElement): void {
     }
   }, true);
 }
+
+// ── Editor Toolbar ────────────────────────────────────────────────────────────
+function buildEditorToolbar(editor: TipTapEditor): void {
+  const toolbar = document.getElementById('editor-toolbar');
+  if (!toolbar) return;
+
+  // Render Lucide icons inside the toolbar
+  const lucide = (window as unknown as { lucide?: { createIcons: (opts?: { nameAttr?: string; attrs?: Record<string, string> }) => void } }).lucide;
+  if (lucide?.createIcons) {
+    lucide.createIcons({
+      nameAttr: 'data-lucide',
+      attrs: { 'stroke-width': '1.8' },
+    });
+  }
+
+
+  // ── Active state refresh ──────────────────────────────────────────────────
+  const marks = ['bold', 'italic', 'underline', 'strike', 'code'];
+  const blocks = ['bulletList', 'orderedList', 'taskList', 'blockquote', 'codeBlock'];
+
+  function refreshActive(): void {
+    marks.forEach(m => {
+      document.getElementById(`tb-${m}`)?.classList
+        .toggle('active', editor.isActive(m));
+    });
+    blocks.forEach(b => {
+      const id = b === 'bulletList' ? 'tb-bullet'
+        : b === 'orderedList' ? 'tb-ordered'
+        : b === 'taskList' ? 'tb-task'
+        : b === 'blockquote' ? 'tb-blockquote'
+        : 'tb-codeblock';
+      document.getElementById(id)?.classList.toggle('active', editor.isActive(b));
+    });
+    // Headings — update button label + active state
+    const hBtn = document.getElementById('tb-heading');
+    const hLabel = document.getElementById('tb-heading-label');
+    if (hBtn && hLabel) {
+      const activeLevel = [1,2,3,4].find(l => editor.isActive('heading', { level: l }));
+      hBtn.classList.toggle('active', !!activeLevel);
+      hLabel.textContent = activeLevel ? `H${activeLevel}` : 'Text';
+    }
+    // Link
+    document.getElementById('tb-link')?.classList.toggle('active', editor.isActive('link'));
+  }
+
+  editor.on('transaction', refreshActive);
+  refreshActive();
+
+  // ── Simple button actions ─────────────────────────────────────────────────
+  function btn(id: string, action: () => void): void {
+    document.getElementById(id)?.addEventListener('mousedown', (e) => {
+      e.preventDefault(); // keep editor focus
+      action();
+    });
+  }
+
+  btn('tb-undo', () => editor.chain().focus().undo().run());
+  btn('tb-redo', () => editor.chain().focus().redo().run());
+  btn('tb-bold', () => editor.chain().focus().toggleBold().run());
+  btn('tb-italic', () => editor.chain().focus().toggleItalic().run());
+  btn('tb-underline', () => editor.chain().focus().toggleUnderline().run());
+  btn('tb-strike', () => editor.chain().focus().toggleStrike().run());
+  btn('tb-code', () => editor.chain().focus().toggleCode().run());
+  btn('tb-bullet', () => editor.chain().focus().toggleBulletList().run());
+  btn('tb-ordered', () => editor.chain().focus().toggleOrderedList().run());
+  btn('tb-task', () => editor.chain().focus().toggleTaskList().run());
+  btn('tb-blockquote', () => editor.chain().focus().toggleBlockquote().run());
+  btn('tb-codeblock', () => editor.chain().focus().toggleCodeBlock().run());
+  btn('tb-hr', () => editor.chain().focus().setHorizontalRule().run());
+
+  // ── Heading dropdown ──────────────────────────────────────────────────────
+  const headingWrap = document.getElementById('tb-heading-wrap');
+  const headingMenu = document.getElementById('tb-heading-menu');
+  const headingBtn  = document.getElementById('tb-heading');
+
+  headingBtn?.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    headingMenu?.classList.toggle('open');
+    linkMenu?.classList.remove('open');
+  });
+
+  headingMenu?.querySelectorAll<HTMLButtonElement>('[data-level]').forEach(item => {
+    item.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      const level = parseInt(item.dataset.level || '0');
+      if (level === 0) {
+        // Set paragraph
+        (editor.chain().focus() as unknown as { setParagraph: () => TipTapChain }).setParagraph().run();
+      } else {
+        editor.chain().focus().toggleHeading({ level }).run();
+      }
+      headingMenu.classList.remove('open');
+    });
+  });
+
+  // ── Link dropdown (tabbed: URL / Page picker) ─────────────────────────────
+  const linkWrap    = document.getElementById('tb-link-wrap');
+  const linkMenu    = document.getElementById('tb-link-menu');
+  const linkBtn     = document.getElementById('tb-link');
+  const linkInput   = document.getElementById('tb-link-input') as HTMLInputElement | null;
+  const linkOk      = document.getElementById('tb-link-ok');
+  const linkRemove  = document.getElementById('tb-link-remove');
+  const tabUrl      = document.getElementById('tb-tab-url');
+  const tabPage     = document.getElementById('tb-tab-page');
+  const panelUrl    = document.getElementById('tb-panel-url');
+  const panelPage   = document.getElementById('tb-panel-page');
+  const pageSearch  = document.getElementById('tb-page-search') as HTMLInputElement | null;
+  const pageList    = document.getElementById('tb-page-list');
+
+  // ── Tab switching ──────────────────────────────────────────────────────────
+  function switchTab(tab: 'url' | 'page'): void {
+    tabUrl?.classList.toggle('active', tab === 'url');
+    tabPage?.classList.toggle('active', tab === 'page');
+    panelUrl?.classList.toggle('hidden', tab !== 'url');
+    panelPage?.classList.toggle('hidden', tab !== 'page');
+    if (tab === 'url') {
+      setTimeout(() => linkInput?.focus(), 10);
+    } else {
+      populatePageList('');
+      setTimeout(() => pageSearch?.focus(), 10);
+    }
+  }
+
+  tabUrl?.addEventListener('mousedown', (e) => { e.preventDefault(); switchTab('url'); });
+  tabPage?.addEventListener('mousedown', (e) => { e.preventDefault(); switchTab('page'); });
+
+  // ── Page list builder ──────────────────────────────────────────────────────
+  function populatePageList(query: string): void {
+    if (!pageList) return;
+    const q = query.toLowerCase().trim();
+    pageList.innerHTML = '';
+
+    // Helper: create a single list row
+    function makeItem(p: { id: string; name: string; display_name: string; type: string; parent_id?: string | null }, depth: number): HTMLButtonElement {
+      const item = document.createElement('button');
+      item.className = 'tb-page-item';
+      item.type = 'button';
+      item.dataset.type = p.type;
+
+      // Indent spacer
+      if (depth > 0) {
+        const indent = document.createElement('span');
+        indent.className = 'tb-page-indent';
+        indent.style.width = `${depth * 14}px`;
+        indent.style.flexShrink = '0';
+        item.appendChild(indent);
+      }
+
+      // Icon — folder or file
+      const icon = document.createElement('i');
+      icon.setAttribute('data-lucide', p.type === 'folder' ? 'folder' : 'file-text');
+      item.appendChild(icon);
+
+      // Label + path
+      const labelWrap = document.createElement('span');
+      labelWrap.className = 'tb-page-item-label';
+
+      const nameEl = document.createElement('span');
+      nameEl.className = 'tb-page-item-name';
+      nameEl.textContent = p.display_name || p.name;
+      labelWrap.appendChild(nameEl);
+
+      const pathEl = document.createElement('span');
+      pathEl.className = 'tb-page-item-path';
+      pathEl.textContent = p.name; // human-readable slug, not the base64 id
+      labelWrap.appendChild(pathEl);
+
+      item.appendChild(labelWrap);
+
+      item.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        editor.chain().focus().setLink({ href: `#page/${p.id}`, target: '_self' }).run();
+        linkMenu?.classList.remove('open');
+      });
+
+      return item;
+    }
+
+    if (q) {
+      // ── Search mode: flat filtered list, no indentation ────────────────────
+      const matches = state.pages.filter(p =>
+        p.display_name.toLowerCase().includes(q) || p.name.toLowerCase().includes(q)
+      );
+      if (matches.length === 0) {
+        pageList.innerHTML = '<div class="tb-page-empty">No results found</div>';
+        return;
+      }
+      matches.forEach(p => pageList!.appendChild(makeItem(p, 0)));
+    } else {
+      // ── Tree mode: depth-first traversal with indentation ──────────────────
+      const childMap = new Map<string, typeof state.pages>();
+      state.pages.forEach(p => {
+        const key = p.parent_id || '';
+        if (!childMap.has(key)) childMap.set(key, []);
+        childMap.get(key)!.push(p);
+      });
+
+      // Sort children: folders before pages
+      childMap.forEach((children) => {
+        children.sort((a, b) => {
+          if (a.type === b.type) return (a.display_name || a.name).localeCompare(b.display_name || b.name);
+          return a.type === 'folder' ? -1 : 1;
+        });
+      });
+
+      function traverse(parentId: string, depth: number): void {
+        const children = childMap.get(parentId) || [];
+        children.forEach(p => {
+          pageList!.appendChild(makeItem(p, depth));
+          traverse(p.id, depth + 1);
+        });
+      }
+
+      if ((childMap.get('') || []).length === 0) {
+        pageList.innerHTML = '<div class="tb-page-empty">No pages yet</div>';
+        return;
+      }
+
+      traverse('', 0);
+    }
+
+    // Re-run Lucide for the newly created icons
+    const lucide = (window as unknown as { lucide?: { createIcons: (opts?: Record<string, unknown>) => void } }).lucide;
+    lucide?.createIcons?.({ nameAttr: 'data-lucide', attrs: { 'stroke-width': '1.8' } });
+  }
+
+  pageSearch?.addEventListener('input', () => populatePageList(pageSearch.value));
+  pageSearch?.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.key === 'Escape') linkMenu?.classList.remove('open');
+    if (e.key === 'Enter') {
+      // Pick the first visible item
+      const first = pageList?.querySelector('.tb-page-item') as HTMLButtonElement | null;
+      first?.click();
+    }
+  });
+
+  // ── Open link menu ─────────────────────────────────────────────────────────
+  linkBtn?.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    const wasOpen = linkMenu?.classList.contains('open');
+    linkMenu?.classList.toggle('open');
+    headingMenu?.classList.remove('open');
+    if (!wasOpen && linkMenu?.classList.contains('open')) {
+      // Pre-fill URL tab if cursor is on a link
+      const attrs = editor.isActive('link')
+        ? (editor as unknown as { getAttributes: (n: string) => Record<string, unknown> }).getAttributes('link')
+        : {};
+      const existingHref = (attrs.href as string) || '';
+      if (linkInput) linkInput.value = existingHref;
+      // Reset to URL tab on open
+      switchTab('url');
+    }
+  });
+
+  // ── Apply URL ──────────────────────────────────────────────────────────────
+  linkOk?.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    const url = linkInput?.value.trim() || '';
+    if (url) editor.chain().focus().setLink({ href: url, target: '_blank' }).run();
+    linkMenu?.classList.remove('open');
+  });
+
+  linkInput?.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const url = linkInput.value.trim();
+      if (url) editor.chain().focus().setLink({ href: url, target: '_blank' }).run();
+      linkMenu?.classList.remove('open');
+    }
+    if (e.key === 'Escape') linkMenu?.classList.remove('open');
+  });
+
+  linkRemove?.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    editor.chain().focus().unsetLink().run();
+    linkMenu?.classList.remove('open');
+  });
+
+  // Close dropdowns on outside click
+  document.addEventListener('mousedown', (e) => {
+    if (!headingWrap?.contains(e.target as Node)) headingMenu?.classList.remove('open');
+    if (!linkWrap?.contains(e.target as Node)) linkMenu?.classList.remove('open');
+  }, { capture: true });
+}
+
 
 function renderHtmlEditor(page: PageNode, container: HTMLElement): void {
   // Default: preview-only (full-width iframe)

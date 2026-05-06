@@ -625,6 +625,7 @@ var NotasApp = (() => {
             else if (m.type === "italic") t = `*${t}*`;
             else if (m.type === "strike") t = `~~${t}~~`;
             else if (m.type === "code") t = `\`${t}\``;
+            else if (m.type === "underline") t = `<u>${t}</u>`;
             else if (m.type === "link") t = `[${t}](${m.attrs?.href || ""})`;
           });
         }
@@ -657,9 +658,14 @@ ${code}
         return c.map((n) => {
           const checked = n.attrs?.checked;
           const checkbox = checked ? "[x]" : "[ ]";
-          const content = (n.content || []).map((n2) => block(n2, "")).join("").trimEnd();
-          return `- ${checkbox} ${content}
-`;
+          const children = n.content || [];
+          const first = children[0];
+          const textPart = first ? first.type === "paragraph" ? inline(first.content).trimEnd() : block(first, "").trimEnd() : "";
+          const nestedParts = children.slice(1).map(
+            (n2) => block(n2, "").replace(/^(.)/gm, "  $1")
+          ).join("");
+          return `- ${checkbox} ${textPart}
+${nestedParts}`;
         }).join("");
       }
       if (t === "listItem" || t === "taskItem") {
@@ -669,7 +675,7 @@ ${code}
           }
           return block(n, "").trimEnd();
         });
-        return indent + parts.join("\n").trimEnd() + "\n";
+        return indent + parts.join("\n") + "\n";
       }
       if (t === "hardBreak") return "  \n";
       if (t === "text") return node.text || "";
@@ -700,6 +706,108 @@ ${code}
     container.className = "content-area wysiwyg-wrap fade-in";
     container.innerHTML = `
     <div class="wysiwyg-page">
+      <div class="editor-toolbar" id="editor-toolbar" role="toolbar" aria-label="Formatting">
+
+        <!-- History -->
+        <button class="tb-btn" id="tb-undo" title="Undo (\u2318Z)">
+          <i data-lucide="undo-2"></i>
+        </button>
+        <button class="tb-btn" id="tb-redo" title="Redo (\u2318\u21E7Z)">
+          <i data-lucide="redo-2"></i>
+        </button>
+
+        <span class="tb-sep"></span>
+
+        <!-- Heading dropdown -->
+        <div class="tb-dropdown" id="tb-heading-wrap">
+          <button class="tb-btn tb-dropdown-btn" id="tb-heading" title="Text style">
+            <span class="tb-heading-label" id="tb-heading-label">Text</span>
+            <i data-lucide="chevron-down" class="tb-caret"></i>
+          </button>
+          <div class="tb-dropdown-menu" id="tb-heading-menu">
+            <button class="tb-menu-item" data-level="1"><span class="tb-menu-badge">H1</span>Heading 1</button>
+            <button class="tb-menu-item" data-level="2"><span class="tb-menu-badge">H2</span>Heading 2</button>
+            <button class="tb-menu-item" data-level="3"><span class="tb-menu-badge">H3</span>Heading 3</button>
+            <button class="tb-menu-item" data-level="4"><span class="tb-menu-badge">H4</span>Heading 4</button>
+            <div class="tb-menu-divider"></div>
+            <button class="tb-menu-item" data-level="0"><span class="tb-menu-badge">\xB6</span>Normal</button>
+          </div>
+        </div>
+
+        <span class="tb-sep"></span>
+
+        <!-- Inline marks -->
+        <button class="tb-btn" id="tb-bold" title="Bold (\u2318B)">
+          <i data-lucide="bold"></i>
+        </button>
+        <button class="tb-btn" id="tb-italic" title="Italic (\u2318I)">
+          <i data-lucide="italic"></i>
+        </button>
+        <button class="tb-btn" id="tb-underline" title="Underline (\u2318U)">
+          <i data-lucide="underline"></i>
+        </button>
+        <button class="tb-btn" id="tb-strike" title="Strikethrough">
+          <i data-lucide="strikethrough"></i>
+        </button>
+        <button class="tb-btn" id="tb-code" title="Inline code">
+          <i data-lucide="code"></i>
+        </button>
+
+        <span class="tb-sep"></span>
+
+        <!-- Block nodes -->
+        <button class="tb-btn" id="tb-bullet" title="Bullet list">
+          <i data-lucide="list"></i>
+        </button>
+        <button class="tb-btn" id="tb-ordered" title="Numbered list">
+          <i data-lucide="list-ordered"></i>
+        </button>
+        <button class="tb-btn" id="tb-task" title="Task list">
+          <i data-lucide="list-checks"></i>
+        </button>
+        <button class="tb-btn" id="tb-blockquote" title="Blockquote">
+          <i data-lucide="quote"></i>
+        </button>
+        <button class="tb-btn" id="tb-codeblock" title="Code block">
+          <i data-lucide="terminal-square"></i>
+        </button>
+
+        <span class="tb-sep"></span>
+
+        <!-- Link -->
+        <div class="tb-dropdown" id="tb-link-wrap">
+          <button class="tb-btn" id="tb-link" title="Link (\u2318K)">
+            <i data-lucide="link"></i>
+          </button>
+          <div class="tb-dropdown-menu tb-link-menu" id="tb-link-menu">
+            <!-- Tabs -->
+            <div class="tb-link-tabs">
+              <button class="tb-link-tab active" id="tb-tab-url" data-tab="url">URL</button>
+              <button class="tb-link-tab" id="tb-tab-page" data-tab="page">Page</button>
+            </div>
+
+            <!-- URL panel -->
+            <div class="tb-link-panel" id="tb-panel-url">
+              <input class="tb-link-input" id="tb-link-input" type="url" placeholder="https://\u2026" autocomplete="off" spellcheck="false" />
+              <div class="tb-link-actions">
+                <button class="tb-link-ok" id="tb-link-ok">Apply</button>
+                <button class="tb-link-remove" id="tb-link-remove">Remove</button>
+              </div>
+            </div>
+
+            <!-- Page picker panel -->
+            <div class="tb-link-panel hidden" id="tb-panel-page">
+              <input class="tb-link-input" id="tb-page-search" type="text" placeholder="Search pages\u2026" autocomplete="off" spellcheck="false" />
+              <div class="tb-page-list" id="tb-page-list"></div>
+            </div>
+          </div>
+        </div>
+
+        <button class="tb-btn" id="tb-hr" title="Horizontal rule">
+          <i data-lucide="minus"></i>
+        </button>
+
+      </div>
       <div id="wysiwyg-editor" class="tiptap-host" spellcheck="true"></div>
       <div class="tiptap-hint">
         <span><kbd>**</kbd> bold</span>
@@ -707,10 +815,10 @@ ${code}
         <span><kbd># </kbd> heading</span>
         <span><kbd>- </kbd> list</span>
         <span><kbd>[] </kbd> task</span>
-        <span><kbd>&gt; </kbd> quote</span>
+        <span><kbd>> </kbd> quote</span>
         <span><kbd>\`\`\` </kbd> code</span>
       </div>
-      ${renderAssetsSection(page)}
+            ${renderAssetsSection(page)}
       ${renderUploadZone(page.id)}
     </div>
   `;
@@ -727,7 +835,7 @@ ${code}
       console.error("TipTapBundle not found on window");
       return;
     }
-    const { Editor, Extension, InputRule, StarterKit, TaskList, TaskItem, Placeholder, Table, TableRow, TableCell, TableHeader } = window.TipTapBundle;
+    const { Editor, Extension, InputRule, StarterKit, TaskList, TaskItem, Placeholder, Table, TableRow, TableCell, TableHeader, Underline, Link, ListKeymap } = window.TipTapBundle;
     const TaskBracketRule = Extension.create({
       name: "taskBracketRule",
       addInputRules() {
@@ -755,6 +863,13 @@ ${code}
         TableRow,
         TableCell,
         TableHeader,
+        Underline,
+        Link.configure({
+          openOnClick: false,
+          validate: () => true,
+          HTMLAttributes: { rel: "noopener noreferrer" }
+        }),
+        ListKeymap,
         Placeholder.configure({
           placeholder: "Start writing\u2026 Use # for headings, [] for tasks, - for lists"
         })
@@ -771,6 +886,7 @@ ${code}
       }
     });
     state.wysiwyg = editor;
+    buildEditorToolbar(editor);
     $("wysiwyg-editor").addEventListener("keydown", (e) => {
       const ke = e;
       if ((ke.metaKey || ke.ctrlKey) && ke.key === "s") {
@@ -778,6 +894,229 @@ ${code}
         savePage(tiptapToMarkdown(editor.getJSON()));
       }
     }, true);
+  }
+  function buildEditorToolbar(editor) {
+    const toolbar = document.getElementById("editor-toolbar");
+    if (!toolbar) return;
+    const lucide = window.lucide;
+    if (lucide?.createIcons) {
+      lucide.createIcons({
+        nameAttr: "data-lucide",
+        attrs: { "stroke-width": "1.8" }
+      });
+    }
+    const marks = ["bold", "italic", "underline", "strike", "code"];
+    const blocks = ["bulletList", "orderedList", "taskList", "blockquote", "codeBlock"];
+    function refreshActive() {
+      marks.forEach((m) => {
+        document.getElementById(`tb-${m}`)?.classList.toggle("active", editor.isActive(m));
+      });
+      blocks.forEach((b) => {
+        const id = b === "bulletList" ? "tb-bullet" : b === "orderedList" ? "tb-ordered" : b === "taskList" ? "tb-task" : b === "blockquote" ? "tb-blockquote" : "tb-codeblock";
+        document.getElementById(id)?.classList.toggle("active", editor.isActive(b));
+      });
+      const hBtn = document.getElementById("tb-heading");
+      const hLabel = document.getElementById("tb-heading-label");
+      if (hBtn && hLabel) {
+        const activeLevel = [1, 2, 3, 4].find((l) => editor.isActive("heading", { level: l }));
+        hBtn.classList.toggle("active", !!activeLevel);
+        hLabel.textContent = activeLevel ? `H${activeLevel}` : "Text";
+      }
+      document.getElementById("tb-link")?.classList.toggle("active", editor.isActive("link"));
+    }
+    editor.on("transaction", refreshActive);
+    refreshActive();
+    function btn(id, action) {
+      document.getElementById(id)?.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        action();
+      });
+    }
+    btn("tb-undo", () => editor.chain().focus().undo().run());
+    btn("tb-redo", () => editor.chain().focus().redo().run());
+    btn("tb-bold", () => editor.chain().focus().toggleBold().run());
+    btn("tb-italic", () => editor.chain().focus().toggleItalic().run());
+    btn("tb-underline", () => editor.chain().focus().toggleUnderline().run());
+    btn("tb-strike", () => editor.chain().focus().toggleStrike().run());
+    btn("tb-code", () => editor.chain().focus().toggleCode().run());
+    btn("tb-bullet", () => editor.chain().focus().toggleBulletList().run());
+    btn("tb-ordered", () => editor.chain().focus().toggleOrderedList().run());
+    btn("tb-task", () => editor.chain().focus().toggleTaskList().run());
+    btn("tb-blockquote", () => editor.chain().focus().toggleBlockquote().run());
+    btn("tb-codeblock", () => editor.chain().focus().toggleCodeBlock().run());
+    btn("tb-hr", () => editor.chain().focus().setHorizontalRule().run());
+    const headingWrap = document.getElementById("tb-heading-wrap");
+    const headingMenu = document.getElementById("tb-heading-menu");
+    const headingBtn = document.getElementById("tb-heading");
+    headingBtn?.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      headingMenu?.classList.toggle("open");
+      linkMenu?.classList.remove("open");
+    });
+    headingMenu?.querySelectorAll("[data-level]").forEach((item) => {
+      item.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        const level = parseInt(item.dataset.level || "0");
+        if (level === 0) {
+          editor.chain().focus().setParagraph().run();
+        } else {
+          editor.chain().focus().toggleHeading({ level }).run();
+        }
+        headingMenu.classList.remove("open");
+      });
+    });
+    const linkWrap = document.getElementById("tb-link-wrap");
+    const linkMenu = document.getElementById("tb-link-menu");
+    const linkBtn = document.getElementById("tb-link");
+    const linkInput = document.getElementById("tb-link-input");
+    const linkOk = document.getElementById("tb-link-ok");
+    const linkRemove = document.getElementById("tb-link-remove");
+    const tabUrl = document.getElementById("tb-tab-url");
+    const tabPage = document.getElementById("tb-tab-page");
+    const panelUrl = document.getElementById("tb-panel-url");
+    const panelPage = document.getElementById("tb-panel-page");
+    const pageSearch = document.getElementById("tb-page-search");
+    const pageList = document.getElementById("tb-page-list");
+    function switchTab(tab) {
+      tabUrl?.classList.toggle("active", tab === "url");
+      tabPage?.classList.toggle("active", tab === "page");
+      panelUrl?.classList.toggle("hidden", tab !== "url");
+      panelPage?.classList.toggle("hidden", tab !== "page");
+      if (tab === "url") {
+        setTimeout(() => linkInput?.focus(), 10);
+      } else {
+        populatePageList("");
+        setTimeout(() => pageSearch?.focus(), 10);
+      }
+    }
+    tabUrl?.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      switchTab("url");
+    });
+    tabPage?.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      switchTab("page");
+    });
+    function populatePageList(query) {
+      if (!pageList) return;
+      const q = query.toLowerCase().trim();
+      pageList.innerHTML = "";
+      function makeItem(p, depth) {
+        const item = document.createElement("button");
+        item.className = "tb-page-item";
+        item.type = "button";
+        item.dataset.type = p.type;
+        if (depth > 0) {
+          const indent = document.createElement("span");
+          indent.className = "tb-page-indent";
+          indent.style.width = `${depth * 14}px`;
+          indent.style.flexShrink = "0";
+          item.appendChild(indent);
+        }
+        const icon = document.createElement("i");
+        icon.setAttribute("data-lucide", p.type === "folder" ? "folder" : "file-text");
+        item.appendChild(icon);
+        const labelWrap = document.createElement("span");
+        labelWrap.className = "tb-page-item-label";
+        const nameEl = document.createElement("span");
+        nameEl.className = "tb-page-item-name";
+        nameEl.textContent = p.display_name || p.name;
+        labelWrap.appendChild(nameEl);
+        const pathEl = document.createElement("span");
+        pathEl.className = "tb-page-item-path";
+        pathEl.textContent = p.name;
+        labelWrap.appendChild(pathEl);
+        item.appendChild(labelWrap);
+        item.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          editor.chain().focus().setLink({ href: `#page/${p.id}`, target: "_self" }).run();
+          linkMenu?.classList.remove("open");
+        });
+        return item;
+      }
+      if (q) {
+        const matches = state.pages.filter(
+          (p) => p.display_name.toLowerCase().includes(q) || p.name.toLowerCase().includes(q)
+        );
+        if (matches.length === 0) {
+          pageList.innerHTML = '<div class="tb-page-empty">No results found</div>';
+          return;
+        }
+        matches.forEach((p) => pageList.appendChild(makeItem(p, 0)));
+      } else {
+        let traverse2 = function(parentId, depth) {
+          const children = childMap.get(parentId) || [];
+          children.forEach((p) => {
+            pageList.appendChild(makeItem(p, depth));
+            traverse2(p.id, depth + 1);
+          });
+        };
+        var traverse = traverse2;
+        const childMap = /* @__PURE__ */ new Map();
+        state.pages.forEach((p) => {
+          const key = p.parent_id || "";
+          if (!childMap.has(key)) childMap.set(key, []);
+          childMap.get(key).push(p);
+        });
+        childMap.forEach((children) => {
+          children.sort((a, b) => {
+            if (a.type === b.type) return (a.display_name || a.name).localeCompare(b.display_name || b.name);
+            return a.type === "folder" ? -1 : 1;
+          });
+        });
+        if ((childMap.get("") || []).length === 0) {
+          pageList.innerHTML = '<div class="tb-page-empty">No pages yet</div>';
+          return;
+        }
+        traverse2("", 0);
+      }
+      const lucide2 = window.lucide;
+      lucide2?.createIcons?.({ nameAttr: "data-lucide", attrs: { "stroke-width": "1.8" } });
+    }
+    pageSearch?.addEventListener("input", () => populatePageList(pageSearch.value));
+    pageSearch?.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") linkMenu?.classList.remove("open");
+      if (e.key === "Enter") {
+        const first = pageList?.querySelector(".tb-page-item");
+        first?.click();
+      }
+    });
+    linkBtn?.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      const wasOpen = linkMenu?.classList.contains("open");
+      linkMenu?.classList.toggle("open");
+      headingMenu?.classList.remove("open");
+      if (!wasOpen && linkMenu?.classList.contains("open")) {
+        const attrs = editor.isActive("link") ? editor.getAttributes("link") : {};
+        const existingHref = attrs.href || "";
+        if (linkInput) linkInput.value = existingHref;
+        switchTab("url");
+      }
+    });
+    linkOk?.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      const url = linkInput?.value.trim() || "";
+      if (url) editor.chain().focus().setLink({ href: url, target: "_blank" }).run();
+      linkMenu?.classList.remove("open");
+    });
+    linkInput?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const url = linkInput.value.trim();
+        if (url) editor.chain().focus().setLink({ href: url, target: "_blank" }).run();
+        linkMenu?.classList.remove("open");
+      }
+      if (e.key === "Escape") linkMenu?.classList.remove("open");
+    });
+    linkRemove?.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      editor.chain().focus().unsetLink().run();
+      linkMenu?.classList.remove("open");
+    });
+    document.addEventListener("mousedown", (e) => {
+      if (!headingWrap?.contains(e.target)) headingMenu?.classList.remove("open");
+      if (!linkWrap?.contains(e.target)) linkMenu?.classList.remove("open");
+    }, { capture: true });
   }
   function renderHtmlEditor(page, container) {
     container.className = "content-area fade-in";
