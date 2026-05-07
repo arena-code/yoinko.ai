@@ -742,7 +742,7 @@ body {
 .content-area {
   flex: 1;
   overflow-y: auto;
-  padding: 36px 48px;
+  padding: 20px 48px;
   position: relative;
 }
 
@@ -790,7 +790,15 @@ body {
 }
 
 .folder-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
   margin-bottom: 32px;
+}
+
+.folder-title-group {
+  min-width: 0;
 }
 
 .folder-num {
@@ -814,6 +822,14 @@ body {
   font-size: 15px;
   color: var(--text-muted);
   margin-top: 6px;
+}
+
+.folder-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding-top: 6px;
 }
 
 /* Children grid */
@@ -1843,12 +1859,6 @@ body {
   box-shadow: 2px 2px 0 var(--ink);
 }
 
-.folder-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 2px;
-}
 
 .btn-primary {
   background: var(--tomato);

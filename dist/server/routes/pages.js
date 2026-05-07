@@ -111,6 +111,28 @@ router.put('/:id', (req, res) => {
             const newFileName = ext ? `${name}${ext}` : name;
             const newRelPath = renamePath(pagesDir, relPath, newFileName);
             const newId = toId(newRelPath);
+            // If this is a folder rename (no extension), migrate asset page_ids
+            // that referenced pages inside the old folder path.
+            if (!ext) {
+                const db = getProjectDb(pid, dataDir(req));
+                const oldPrefix = relPath + '/'; // e.g. "01 - Branding/"
+                const newPrefix = newRelPath + '/'; // e.g. "Branding/"
+                const allAssets = db.prepare(`SELECT id, page_id FROM assets WHERE page_id IS NOT NULL`).all();
+                const updateStmt = db.prepare(`UPDATE assets SET page_id = ? WHERE id = ?`);
+                for (const asset of allAssets) {
+                    if (!asset.page_id)
+                        continue;
+                    try {
+                        const assetPath = Buffer.from(asset.page_id, 'base64url').toString('utf8');
+                        if (assetPath.startsWith(oldPrefix)) {
+                            const updatedPath = newPrefix + assetPath.slice(oldPrefix.length);
+                            const updatedId = Buffer.from(updatedPath).toString('base64url');
+                            updateStmt.run(updatedId, asset.id);
+                        }
+                    }
+                    catch { /* skip malformed ids */ }
+                }
+            }
             const flat = flattenTree(scanDir(pagesDir));
             const page = flat.find(p => p.id === newId);
             return void res.json({ page: page ?? { id: newId, path: newRelPath, name } });

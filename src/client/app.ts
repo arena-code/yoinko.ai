@@ -775,11 +775,11 @@ function tiptapToMarkdown(doc: TipTapDoc): string {
         // code mark: no inner markdown, return immediately
         if (n.marks.some(m => m.type === 'code')) return `\`${t}\``;
         n.marks.forEach(m => {
-          if      (m.type === 'bold')      t = `**${t}**`;
-          else if (m.type === 'italic')    t = `*${t}*`;
-          else if (m.type === 'strike')    t = `~~${t}~~`;
+          if (m.type === 'bold') t = `**${t}**`;
+          else if (m.type === 'italic') t = `*${t}*`;
+          else if (m.type === 'strike') t = `~~${t}~~`;
           else if (m.type === 'underline') t = `<u>${t}</u>`;
-          else if (m.type === 'link')      t = `[${t}](${(m.attrs?.href as string) || ''})`;
+          else if (m.type === 'link') t = `[${t}](${(m.attrs?.href as string) || ''})`;
         });
       }
       return t;
@@ -817,10 +817,10 @@ function tiptapToMarkdown(doc: TipTapDoc): string {
 
     if (t === 'blockquote') {
       return c.map(n => blk(n).replace(/^/gm, '> ').replace(/> $/gm, '>').trimEnd())
-              .join('\n') + '\n';
+        .join('\n') + '\n';
     }
 
-    if (t === 'bulletList')  return c.map(n => serializeListItem(n, '- ')).join('');
+    if (t === 'bulletList') return c.map(n => serializeListItem(n, '- ')).join('');
     if (t === 'orderedList') {
       let i = (node.attrs?.start as number) || 1;
       return c.map(n => serializeListItem(n, `${i++}. `)).join('');
@@ -828,10 +828,10 @@ function tiptapToMarkdown(doc: TipTapDoc): string {
 
     if (t === 'taskList') {
       return c.map(n => {
-        const checked  = n.attrs?.checked;
+        const checked = n.attrs?.checked;
         const checkbox = checked ? '[x]' : '[ ]';
         const children = n.content || [];
-        const first    = children[0];
+        const first = children[0];
         const textPart = first
           ? (first.type === 'paragraph' ? inline(first.content).trimEnd() : blk(first).trimEnd())
           : '';
@@ -841,7 +841,7 @@ function tiptapToMarkdown(doc: TipTapDoc): string {
     }
 
     if (t === 'hardBreak') return '  \n';
-    if (t === 'text')      return node.text || '';
+    if (t === 'text') return node.text || '';
 
     if (t === 'table') {
       const rows = c.map((row, rowIdx) => {
@@ -1096,16 +1096,16 @@ function buildEditorToolbar(editor: TipTapEditor): void {
     blocks.forEach(b => {
       const id = b === 'bulletList' ? 'tb-bullet'
         : b === 'orderedList' ? 'tb-ordered'
-        : b === 'taskList' ? 'tb-task'
-        : b === 'blockquote' ? 'tb-blockquote'
-        : 'tb-codeblock';
+          : b === 'taskList' ? 'tb-task'
+            : b === 'blockquote' ? 'tb-blockquote'
+              : 'tb-codeblock';
       document.getElementById(id)?.classList.toggle('active', editor.isActive(b));
     });
     // Headings — update button label + active state
     const hBtn = document.getElementById('tb-heading');
     const hLabel = document.getElementById('tb-heading-label');
     if (hBtn && hLabel) {
-      const activeLevel = [1,2,3,4].find(l => editor.isActive('heading', { level: l }));
+      const activeLevel = [1, 2, 3, 4].find(l => editor.isActive('heading', { level: l }));
       hBtn.classList.toggle('active', !!activeLevel);
       hLabel.textContent = activeLevel ? `H${activeLevel}` : 'Text';
     }
@@ -1141,7 +1141,7 @@ function buildEditorToolbar(editor: TipTapEditor): void {
   // ── Heading dropdown ──────────────────────────────────────────────────────
   const headingWrap = document.getElementById('tb-heading-wrap');
   const headingMenu = document.getElementById('tb-heading-menu');
-  const headingBtn  = document.getElementById('tb-heading');
+  const headingBtn = document.getElementById('tb-heading');
 
   headingBtn?.addEventListener('mousedown', (e) => {
     e.preventDefault();
@@ -1164,18 +1164,18 @@ function buildEditorToolbar(editor: TipTapEditor): void {
   });
 
   // ── Link dropdown (tabbed: URL / Page picker) ─────────────────────────────
-  const linkWrap    = document.getElementById('tb-link-wrap');
-  const linkMenu    = document.getElementById('tb-link-menu');
-  const linkBtn     = document.getElementById('tb-link');
-  const linkInput   = document.getElementById('tb-link-input') as HTMLInputElement | null;
-  const linkOk      = document.getElementById('tb-link-ok');
-  const linkRemove  = document.getElementById('tb-link-remove');
-  const tabUrl      = document.getElementById('tb-tab-url');
-  const tabPage     = document.getElementById('tb-tab-page');
-  const panelUrl    = document.getElementById('tb-panel-url');
-  const panelPage   = document.getElementById('tb-panel-page');
-  const pageSearch  = document.getElementById('tb-page-search') as HTMLInputElement | null;
-  const pageList    = document.getElementById('tb-page-list');
+  const linkWrap = document.getElementById('tb-link-wrap');
+  const linkMenu = document.getElementById('tb-link-menu');
+  const linkBtn = document.getElementById('tb-link');
+  const linkInput = document.getElementById('tb-link-input') as HTMLInputElement | null;
+  const linkOk = document.getElementById('tb-link-ok');
+  const linkRemove = document.getElementById('tb-link-remove');
+  const tabUrl = document.getElementById('tb-tab-url');
+  const tabPage = document.getElementById('tb-tab-page');
+  const panelUrl = document.getElementById('tb-panel-url');
+  const panelPage = document.getElementById('tb-panel-page');
+  const pageSearch = document.getElementById('tb-page-search') as HTMLInputElement | null;
+  const pageList = document.getElementById('tb-page-list');
 
   // ── Tab switching ──────────────────────────────────────────────────────────
   function switchTab(tab: 'url' | 'page'): void {
@@ -1463,14 +1463,16 @@ function renderFolderView(page: PageNode, container: HTMLElement): void {
   container.innerHTML = `
     <div class="folder-index">
       <div class="folder-header">
-        <div class="folder-actions" style="margin-bottom:12px;">
+        <div class="folder-title-group">
+          ${rootIdx >= 0 ? `<div class="folder-num">SECTION ${sectionNum}</div>` : ''}
+          <h1 class="folder-title" style="margin:0">${esc(displayName)}</h1>
+          <p class="folder-meta">${children.length + (page.assets?.length || 0)} item${(children.length + (page.assets?.length || 0)) !== 1 ? 's' : ''}</p>
+        </div>
+        <div class="folder-actions">
           <button class="btn btn-sm btn-ghost" onclick="openNewPageModal('page','${page.id}')">📝 Add Page</button>
           <button class="btn btn-sm btn-ghost" onclick="openNewPageModal('folder','${page.id}')">📁 Add Folder</button>
           <button class="btn btn-sm btn-ghost" onclick="openNewPageModal('image')">🖼️ Add Image</button>
         </div>
-        <div class="folder-num">SECTION ${sectionNum}</div>
-        <h1 class="folder-title" style="margin:0">${esc(displayName)}</h1>
-        <p class="folder-meta">${children.length + (page.assets?.length || 0)} item${(children.length + (page.assets?.length || 0)) !== 1 ? 's' : ''}</p>
       </div>
 
       <div class="section-heading">Contents</div>
@@ -1692,9 +1694,9 @@ function openNewPageModal(defaultType: 'page' | 'folder' | 'image' = 'page', ctx
   // Reflect AI availability on the AI Image type-option
   const imageOption = document.getElementById('type-option-image');
   if (imageOption) {
-    imageOption.style.opacity      = state.aiEnabled ? '' : '0.4';
+    imageOption.style.opacity = state.aiEnabled ? '' : '0.4';
     imageOption.style.pointerEvents = state.aiEnabled ? '' : 'none';
-    imageOption.title               = state.aiEnabled ? '' : 'Configure an AI profile first';
+    imageOption.title = state.aiEnabled ? '' : 'Configure an AI profile first';
   }
 
   $('new-page-overlay').classList.add('open');
@@ -1736,11 +1738,11 @@ function closeNewPageModal(): void {
 function updateTypeOptions(type: string): void {
   $$('.type-option').forEach(opt => opt.classList.toggle('selected', opt.dataset.type === type));
   const isFolder = type === 'folder';
-  const isImage  = type === 'image';
-  $('new-page-file-type-row').style.display  = (isFolder || isImage) ? 'none' : '';
-  $('new-page-parent-row').style.display     = (isFolder || isImage) ? 'none' : '';
-  $('new-page-ai-section').style.display     = 'none';
-  $('new-page-image-section').style.display  = isImage ? '' : 'none';
+  const isImage = type === 'image';
+  $('new-page-file-type-row').style.display = (isFolder || isImage) ? 'none' : '';
+  $('new-page-parent-row').style.display = (isFolder || isImage) ? 'none' : '';
+  $('new-page-ai-section').style.display = 'none';
+  $('new-page-image-section').style.display = isImage ? '' : 'none';
 
   // Pre-fill with AI: never shown for folders, only shown for pages when AI enabled
   const showPrefill = !isFolder && !isImage && state.aiEnabled;
@@ -1775,7 +1777,7 @@ function selectType(type: 'page' | 'folder'): void {
 
 function toggleAiFill(): void {
   const section = $('new-page-ai-section');
-  const card    = $('new-page-ai-prefill-row'); // the card IS the prefill row
+  const card = $('new-page-ai-prefill-row'); // the card IS the prefill row
   const isActive = card?.dataset.active === 'true';
 
   if (isActive) {
@@ -1890,6 +1892,15 @@ async function submitNewPage(): Promise<void> {
 
 // ── Welcome screen ────────────────────────────────────────────────────────────
 function showWelcome(): void {
+  // Cancel any pending auto-save and tear down the editor before clearing state
+  clearTimeout(saveTimer);
+  if (state.wysiwyg) {
+    try { state.wysiwyg.destroy(); } catch { /* ignore */ }
+    state.wysiwyg = null;
+  }
+
+  // Clear the URL hash so hashchange doesn't re-navigate to a deleted page
+  history.replaceState(null, '', window.location.pathname);
   state.currentPageId = null;
   state.currentPage = null;
   state.editMode = false;
@@ -1909,11 +1920,14 @@ function showWelcome(): void {
       </div>
     </div>
   `;
-  $('topbar-badge').textContent = '';
-  ($('page-title') as HTMLInputElement).value = '';
-  $('bc-parent').textContent = 'yoınko';
+  const badge = document.getElementById('topbar-badge');
+  if (badge) badge.textContent = '';
+  const titleEl = document.getElementById('page-title') as HTMLInputElement | null;
+  if (titleEl) titleEl.value = '';
+  const bcParent = document.getElementById('bc-parent');
+  if (bcParent) bcParent.textContent = 'yoınko';
 
-  $('edit-toggle-btn').classList.add('hidden');
+  document.getElementById('html-edit-btn')?.classList.add('hidden');
   hideSaveState();
 }
 
@@ -1957,13 +1971,24 @@ function deletePageConfirm(id: string, name: string): void {
 
 async function submitDelete(): Promise<void> {
   $('delete-overlay').classList.remove('open');
+
+  // Navigate away immediately if we're on the page being deleted.
+  // This clears state.currentPageId + hash BEFORE the API call,
+  // so no save/render callbacks can fire against the deleted resource.
+  const wasCurrent = state.currentPageId === _deleteId;
+  if (wasCurrent) showWelcome();
+
+  // Optimistically remove from local state so any hashchange that fires
+  // during loadPages won't try to navigate back to the deleted page.
+  state.pages = state.pages.filter(p => p.id !== _deleteId);
+
   try {
     await api.deletePage(_deleteId);
-    await loadPages();
-    if (state.currentPageId === _deleteId) showWelcome();
+    await loadPages(); // refresh sidebar with authoritative server list
     showToast('Deleted.');
   } catch (err) {
     showToast('Delete failed: ' + (err as Error).message, 'error');
+    await loadPages(); // restore sidebar on failure
   }
 }
 
@@ -2150,7 +2175,7 @@ function clearChat(): void {
   state.chatMessages = [];
   renderChatMessages();
   if (state.currentPageId) {
-    api.deleteChatHistory(state.currentPageId).catch(() => {});
+    api.deleteChatHistory(state.currentPageId).catch(() => { });
   }
 }
 
@@ -2463,7 +2488,7 @@ function renderMarkdown(text: string): string {
           // Unwrap loose <p> wrapper if present
           itemHtml = itemHtml.replace(/^<p>([\s\S]*?)<\/p>$/, '$1').trim();
           return `<li data-type="taskItem" ${isChecked ? 'data-checked="true"' : 'data-checked="false"'}>` +
-                 `<label><input type="checkbox" ${isChecked ? 'checked' : ''}><span>${itemHtml}</span></label></li>`;
+            `<label><input type="checkbox" ${isChecked ? 'checked' : ''}><span>${itemHtml}</span></label></li>`;
         }
       );
       return `<ul data-type="taskList">${converted}</ul>`;

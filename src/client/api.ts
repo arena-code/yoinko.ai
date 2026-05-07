@@ -19,6 +19,21 @@ export function setCurrentProjectId(id: string): void {
   localStorage.setItem('yoinko_project', id);
 }
 
+// ── Auth expiry handler ─────────────────────────────────────────────────────
+// Called whenever the server returns 401 (token expired) or 403 (invalid token).
+// Clears all client-side storage and redirects to the logout endpoint so the
+// user is cleanly signed out and cannot perform any further writes.
+let _logoutTriggered = false;
+function handleAuthFailure(): never {
+  if (!_logoutTriggered) {
+    _logoutTriggered = true;
+    try { localStorage.clear(); } catch { /* ignore */ }
+    try { sessionStorage.clear(); } catch { /* ignore */ }
+    window.location.replace('/auth/logout');
+  }
+  throw new Error('Session expired — signing out…');
+}
+
 async function request<T>(method: HttpMethod, path: string, body?: unknown, isFormData = false): Promise<T> {
   const headers: Record<string, string> = isFormData
     ? { 'X-Project-Id': _currentProjectId }
@@ -29,6 +44,12 @@ async function request<T>(method: HttpMethod, path: string, body?: unknown, isFo
     opts.body = isFormData ? (body as FormData) : JSON.stringify(body);
   }
   const res = await fetch(`${API_BASE}${path}`, opts);
+
+  // Token expired or invalid — force logout immediately
+  if (res.status === 401 || res.status === 403) {
+    handleAuthFailure();
+  }
+
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText })) as { error?: string };
     throw new Error(err.error ?? `HTTP ${res.status}`);
@@ -119,6 +140,10 @@ export const api = {
         },
         body: JSON.stringify({ messages, page_id: pageId, page_content: pageContent }),
       });
+      if (res.status === 401 || res.status === 403) {
+        handleAuthFailure();
+        return;
+      }
       if (!res.ok) {
         const err = await res.json().catch(() => ({})) as { error?: string };
         onError(err.error ?? 'Chat failed');

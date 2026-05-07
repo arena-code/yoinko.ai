@@ -17,6 +17,7 @@ import { CLOUD_DATA_ROOT } from '../tenant-context.js';
 const CLOUD_ENABLED = process.env.YOINKO_CLOUD === 'true';
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 // JWKS for verifying Supabase ES256 JWTs (auto-caches keys)
 const JWKS = SUPABASE_URL
     ? createRemoteJWKSet(new URL(`${SUPABASE_URL}/auth/v1/.well-known/jwks.json`))
@@ -87,6 +88,73 @@ function extractSupabaseCookie(cookieHeader) {
             parsed = JSON.parse(Buffer.from(raw, 'base64').toString());
         }
         return parsed?.access_token || null;
+    }
+    catch {
+        return null;
+    }
+}
+// Extracts refresh_token from the Supabase SSR cookie (same parsing as above)
+function extractRefreshToken(req) {
+    try {
+        const cookieHeader = req.headers.cookie || '';
+        const cookies = {};
+        cookieHeader.split(';').forEach(c => {
+            const [name, ...rest] = c.trim().split('=');
+            if (name)
+                cookies[name] = rest.join('=');
+        });
+        const authCookieName = Object.keys(cookies).find(n => n.match(/^sb-[^-]+-auth-token$/));
+        let raw = '';
+        if (authCookieName && cookies[authCookieName]) {
+            raw = decodeURIComponent(cookies[authCookieName]);
+        }
+        else {
+            const chunkPrefix = Object.keys(cookies).find(n => n.match(/^sb-[^-]+-auth-token\.0$/));
+            if (!chunkPrefix)
+                return null;
+            const prefix = chunkPrefix.replace(/\.0$/, '');
+            const chunks = [];
+            for (let i = 0;; i++) {
+                const chunk = cookies[`${prefix}.${i}`];
+                if (!chunk)
+                    break;
+                chunks.push(decodeURIComponent(chunk));
+            }
+            raw = chunks.join('');
+        }
+        if (!raw)
+            return null;
+        let parsed;
+        try {
+            parsed = JSON.parse(raw);
+        }
+        catch {
+            parsed = JSON.parse(Buffer.from(raw, 'base64').toString());
+        }
+        return parsed?.refresh_token || null;
+    }
+    catch {
+        return null;
+    }
+}
+// Uses the refresh_token to obtain a new access_token from Supabase.
+// Returns the new access_token string, or null on failure.
+async function refreshAccessToken(refreshToken) {
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY)
+        return null;
+    try {
+        const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'apikey': SUPABASE_ANON_KEY,
+            },
+            body: JSON.stringify({ refresh_token: refreshToken }),
+        });
+        if (!res.ok)
+            return null;
+        const data = await res.json();
+        return data.access_token ?? null;
     }
     catch {
         return null;
@@ -245,6 +313,25 @@ async function verifyAndContinue(token, req, res, next) {
     catch (err) {
         const code = err?.code;
         if (code === 'ERR_JWT_EXPIRED') {
+            // ── Transparent token refresh ────────────────────────────────────────
+            // Extract the refresh_token from the Supabase cookie and ask Supabase
+            // for a new access_token.  If successful, store it in a yoinko_token
+            // cookie (survives until browser closes) and retry verification so the
+            // user never sees a logout screen.
+            const refreshToken = extractRefreshToken(req);
+            if (refreshToken) {
+                console.log('[cloud-auth] Access token expired — attempting silent refresh');
+                const newAccessToken = await refreshAccessToken(refreshToken);
+                if (newAccessToken) {
+                    console.log('[cloud-auth] Token refreshed successfully');
+                    // Set the new access token as a session cookie so the next request uses it
+                    res.setHeader('Set-Cookie', `yoinko_token=${encodeURIComponent(newAccessToken)}; Path=/; HttpOnly; SameSite=Lax; Secure`);
+                    // Retry verification with the fresh token
+                    return verifyAndContinue(newAccessToken, req, res, next);
+                }
+                console.log('[cloud-auth] Token refresh failed — refresh token may be revoked');
+            }
+            // Refresh unavailable or failed — redirect to sign-in
             if (req.path.startsWith('/api/')) {
                 res.status(401).json({ error: 'Token expired' });
                 return;

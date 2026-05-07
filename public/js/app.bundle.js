@@ -10,6 +10,22 @@ var NotasApp = (() => {
     _currentProjectId = id;
     localStorage.setItem("yoinko_project", id);
   }
+  var _logoutTriggered = false;
+  function handleAuthFailure() {
+    if (!_logoutTriggered) {
+      _logoutTriggered = true;
+      try {
+        localStorage.clear();
+      } catch {
+      }
+      try {
+        sessionStorage.clear();
+      } catch {
+      }
+      window.location.replace("/auth/logout");
+    }
+    throw new Error("Session expired \u2014 signing out\u2026");
+  }
   async function request(method, path, body, isFormData = false) {
     const headers = isFormData ? { "X-Project-Id": _currentProjectId } : { "Content-Type": "application/json", "X-Project-Id": _currentProjectId };
     const opts = { method, headers };
@@ -17,6 +33,9 @@ var NotasApp = (() => {
       opts.body = isFormData ? body : JSON.stringify(body);
     }
     const res = await fetch(`${API_BASE}${path}`, opts);
+    if (res.status === 401 || res.status === 403) {
+      handleAuthFailure();
+    }
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: res.statusText }));
       throw new Error(err.error ?? `HTTP ${res.status}`);
@@ -65,6 +84,10 @@ var NotasApp = (() => {
           },
           body: JSON.stringify({ messages, page_id: pageId, page_content: pageContent })
         });
+        if (res.status === 401 || res.status === 403) {
+          handleAuthFailure();
+          return;
+        }
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
           onError(err.error ?? "Chat failed");
@@ -1236,14 +1259,16 @@ ${nested}`;
     container.innerHTML = `
     <div class="folder-index">
       <div class="folder-header">
-        <div class="folder-actions" style="margin-bottom:12px;">
+        <div class="folder-title-group">
+          ${rootIdx >= 0 ? `<div class="folder-num">SECTION ${sectionNum}</div>` : ""}
+          <h1 class="folder-title" style="margin:0">${esc(displayName)}</h1>
+          <p class="folder-meta">${children.length + (page.assets?.length || 0)} item${children.length + (page.assets?.length || 0) !== 1 ? "s" : ""}</p>
+        </div>
+        <div class="folder-actions">
           <button class="btn btn-sm btn-ghost" onclick="openNewPageModal('page','${page.id}')">\u{1F4DD} Add Page</button>
           <button class="btn btn-sm btn-ghost" onclick="openNewPageModal('folder','${page.id}')">\u{1F4C1} Add Folder</button>
           <button class="btn btn-sm btn-ghost" onclick="openNewPageModal('image')">\u{1F5BC}\uFE0F Add Image</button>
         </div>
-        <div class="folder-num">SECTION ${sectionNum}</div>
-        <h1 class="folder-title" style="margin:0">${esc(displayName)}</h1>
-        <p class="folder-meta">${children.length + (page.assets?.length || 0)} item${children.length + (page.assets?.length || 0) !== 1 ? "s" : ""}</p>
       </div>
 
       <div class="section-heading">Contents</div>
@@ -1621,6 +1646,15 @@ ${nested}`;
     }
   }
   function showWelcome() {
+    clearTimeout(saveTimer);
+    if (state.wysiwyg) {
+      try {
+        state.wysiwyg.destroy();
+      } catch {
+      }
+      state.wysiwyg = null;
+    }
+    history.replaceState(null, "", window.location.pathname);
     state.currentPageId = null;
     state.currentPage = null;
     state.editMode = false;
@@ -1640,10 +1674,13 @@ ${nested}`;
       </div>
     </div>
   `;
-    $("topbar-badge").textContent = "";
-    $("page-title").value = "";
-    $("bc-parent").textContent = "yo\u0131nko";
-    $("edit-toggle-btn").classList.add("hidden");
+    const badge = document.getElementById("topbar-badge");
+    if (badge) badge.textContent = "";
+    const titleEl = document.getElementById("page-title");
+    if (titleEl) titleEl.value = "";
+    const bcParent = document.getElementById("bc-parent");
+    if (bcParent) bcParent.textContent = "yo\u0131nko";
+    document.getElementById("html-edit-btn")?.classList.add("hidden");
     hideSaveState();
   }
   var _renameId = "";
@@ -1682,13 +1719,16 @@ ${nested}`;
   }
   async function submitDelete() {
     $("delete-overlay").classList.remove("open");
+    const wasCurrent = state.currentPageId === _deleteId;
+    if (wasCurrent) showWelcome();
+    state.pages = state.pages.filter((p) => p.id !== _deleteId);
     try {
       await api.deletePage(_deleteId);
       await loadPages();
-      if (state.currentPageId === _deleteId) showWelcome();
       showToast("Deleted.");
     } catch (err) {
       showToast("Delete failed: " + err.message, "error");
+      await loadPages();
     }
   }
   var ctxMenu = document.createElement("div");
