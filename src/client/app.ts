@@ -1,6 +1,6 @@
 // src/client/app.ts — Main application logic (filesystem-backed)
 import { api, getCurrentProjectId, setCurrentProjectId } from './api.js';
-import type { PageNode, Asset, Settings, LLMMessage, Project, LLMProfile } from '../shared/types.js';
+import type { PageNode, Asset, Settings, LLMMessage, Project, LLMProfile, MdTemplate } from '../shared/types.js';
 
 // ── TipTap editor instance type ───────────────────────────────────────────────
 interface TipTapChain {
@@ -85,6 +85,12 @@ declare global {
     openSettings: () => void;
     closeSettings: () => void;
     selectProvider: (p: string) => void;
+    openSettingsTab: (tab: 'ai' | 'templates') => void;
+    openNewTemplateForm: () => void;
+    editTemplate: (id: string) => void;
+    deleteTemplateById: (id: string) => void;
+    cancelTemplateEdit: () => void;
+    saveCurrentTemplate: () => void;
 
     toggleHtmlEditMode: () => void;
     triggerUpload: (pageId: string) => void;
@@ -93,6 +99,7 @@ declare global {
     applyAiSuggestion: () => void;
     closeLightbox: () => void;
     sendChatMessage: () => void;
+    changeChatProfile: (id: string) => void;
     toggleChat: () => void;
     toggleSidebar: () => void;
     switchProject: (id: string) => void;
@@ -102,10 +109,19 @@ declare global {
     deleteProjectConfirm: (id: string, name: string) => void;
     closeConfirmDeleteProject: (result: boolean) => void;
     openRenameProjectModal: (id: string, name: string) => void;
+    triggerProjectLogoUpload: () => void;
+    handleProjectLogoUpload: (e: Event) => void;
+    removeProjectLogo: () => void;
     closeRenameProjectModal: () => void;
     submitRenameProject: () => void;
     toggleProjectMenu: () => void;
     cloudLogout: () => void;
+    openCodeFileEditor: (id: string, name: string, url: string) => void;
+    closeCodeFileEditor: () => void;
+    saveCodeFile: () => void;
+    switchTab: (tabId: string) => void;
+    closeTab: (tabId: string) => void;
+    openNewTab: () => void;
     addNewProfile: () => void;
     deleteCurrentProfile: () => void;
     confirmDeleteProfile: () => void;
@@ -123,6 +139,12 @@ interface NavPageNode extends PageNode {
   _children: NavPageNode[];
 }
 
+interface AppTab {
+  id: string;
+  pageId: string;
+  name: string;
+}
+
 interface AppState {
   pages: PageNode[];
   projects: Project[];
@@ -138,6 +160,8 @@ interface AppState {
   previewMode?: boolean;
   editMode?: boolean;
   aiEnabled: boolean;
+  openTabs: AppTab[];
+  activeTabId: string | null;
 }
 
 const state: AppState = {
@@ -153,6 +177,8 @@ const state: AppState = {
   settings: {},
   wysiwyg: null,
   aiEnabled: false,
+  openTabs: [],
+  activeTabId: null,
 };
 
 // ── DOM helpers ───────────────────────────────────────────────────────────────
@@ -195,14 +221,27 @@ async function init(): Promise<void> {
   window.openSettings = openSettings;
   window.closeSettings = closeSettings;
   window.selectProvider = selectProvider;
+  window.openSettingsTab = openSettingsTab;
+  window.openNewTemplateForm = openNewTemplateForm;
+  window.editTemplate = editTemplate;
+  window.deleteTemplateById = deleteTemplateById;
+  window.cancelTemplateEdit = cancelTemplateEdit;
+  window.saveCurrentTemplate = saveCurrentTemplate;
 
   window.toggleHtmlEditMode = toggleHtmlEditMode;
+  window.openCodeFileEditor = openCodeFileEditor;
+  window.closeCodeFileEditor = closeCodeFileEditor;
+  window.saveCodeFile = saveCodeFile;
+  window.switchTab = switchTab;
+  window.closeTab = closeTab;
+  window.openNewTab = openNewTab;
   window.triggerUpload = triggerUpload;
   window.handleFileUpload = handleFileUpload;
   window.clearChat = clearChat;
   window.applyAiSuggestion = applyAiSuggestion;
   window.closeLightbox = closeLightbox;
   window.sendChatMessage = sendChatMessage;
+  window.changeChatProfile = changeChatProfile;
   window.toggleChat = toggleChat;
   window.toggleSidebar = toggleSidebar;
   window.switchProject = switchProject;
@@ -212,6 +251,9 @@ async function init(): Promise<void> {
   window.deleteProjectConfirm = deleteProjectConfirm;
   window.closeConfirmDeleteProject = closeConfirmDeleteProject;
   window.openRenameProjectModal = openRenameProjectModal;
+  window.triggerProjectLogoUpload = triggerProjectLogoUpload;
+  window.handleProjectLogoUpload = handleProjectLogoUpload;
+  window.removeProjectLogo = removeProjectLogo;
   window.closeRenameProjectModal = closeRenameProjectModal;
   window.submitRenameProject = submitRenameProject;
   window.addNewProfile = addNewProfile;
@@ -296,6 +338,10 @@ function renderProjectSwitcher(): void {
   const switcher = document.getElementById('project-switcher');
   if (!switcher) return;
 
+  // Preserve the menu's open state across re-renders (a drop reorder rebuilds
+  // the menu DOM, which would otherwise visually "close" the dropdown).
+  const wasMenuOpen = !!document.getElementById('project-menu')?.classList.contains('open');
+
   const currentId = getCurrentProjectId();
   const current = state.projects.find(p => p.id === currentId) ?? state.projects[0];
   const currentName = current?.name ?? 'Default';
@@ -310,11 +356,25 @@ function renderProjectSwitcher(): void {
   const avatarStyle = (name: string, isDefault: boolean) =>
     isDefault ? '' : `style="background: hsl(${hue(name)}, 60%, 48%)"`;
 
+  // Render the avatar — image if a logo is set, otherwise initials with the
+  // generated background color. esc() is the existing HTML-escape helper.
+  const avatarMarkup = (p: Project): string => {
+    if (p.logo) {
+      const url = api.projectLogoUrl(p.id, p.logo);
+      return `<img src="${url}" alt="${esc(p.name)}" class="project-avatar-img"
+                   onerror="this.replaceWith(Object.assign(document.createElement('span'),{
+                     className:'project-avatar-fallback',
+                     textContent:'${esc(initials(p.name))}'
+                   }))">`;
+    }
+    return esc(initials(p.name));
+  };
+
   switcher.innerHTML = `
     <button class="project-switcher-btn" onclick="toggleProjectMenu()" title="Switch project">
-      <span class="project-switcher-avatar" ${avatarStyle(currentName, currentId === 'default')}>${initials(currentName)}</span>
-      <span class="project-switcher-name">${currentName}</span>
-      <svg class="project-switcher-arrow" viewBox="0 0 20 20" fill="currentColor" width="12" height="12"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+      <span class="project-switcher-avatar${current?.logo ? ' has-logo' : ''}" ${current?.logo ? '' : avatarStyle(currentName, currentId === 'default')}>${current ? avatarMarkup(current) : esc(initials(currentName))}</span>
+      <span class="project-switcher-name">${esc(currentName)}</span>
+      <svg class="project-switcher-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><path d="M 6 9 L 12 15 L 18 9"/></svg>
     </button>
     <div class="project-menu" id="project-menu">
       <div class="project-menu-label">Workspaces</div>
@@ -324,14 +384,19 @@ function renderProjectSwitcher(): void {
     return `
         <div class="project-menu-item${isActive ? ' project-menu-item--active' : ''}"
              role="button" tabindex="0"
+             draggable="true"
+             data-project-id="${p.id}"
              onclick="switchProject('${p.id}')"
              onkeydown="if(event.key==='Enter'||event.key===' ')switchProject('${p.id}')">
-          <span class="project-menu-avatar" ${avatarStyle(p.name, p.id === 'default')}>${initials(p.name)}</span>
-          <span class="project-menu-item-name">${p.name}</span>
+          <span class="project-menu-drag-handle" aria-hidden="true" title="Drag to reorder">
+            <svg viewBox="0 0 12 12" width="10" height="10" fill="currentColor"><circle cx="3" cy="3" r="1.2"/><circle cx="9" cy="3" r="1.2"/><circle cx="3" cy="6" r="1.2"/><circle cx="9" cy="6" r="1.2"/><circle cx="3" cy="9" r="1.2"/><circle cx="9" cy="9" r="1.2"/></svg>
+          </span>
+          <span class="project-menu-avatar${p.logo ? ' has-logo' : ''}" ${p.logo ? '' : avatarStyle(p.name, p.id === 'default')}>${avatarMarkup(p)}</span>
+          <span class="project-menu-item-name">${esc(p.name)}</span>
           <span class="project-menu-actions">
                  <button class="project-menu-action-btn"
                          onclick="event.stopPropagation();openRenameProjectModal('${p.id}','${p.name}')"
-                         title="Rename workspace">
+                         title="Edit workspace">
                    <svg viewBox="0 0 12 12" fill="none" width="11" height="11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
                      <path d="M8.5 1.5a1.414 1.414 0 012 2L3.5 10.5l-3 .5.5-3z"/>
                    </svg>
@@ -356,6 +421,98 @@ function renderProjectSwitcher(): void {
       </div>
     </div>
   `;
+
+  // Restore open state across re-renders (e.g. after a drop reorder) so the
+  // dropdown doesn't visually close every time the workspaces are reordered.
+  if (wasMenuOpen) {
+    document.getElementById('project-menu')?.classList.add('open');
+  }
+
+  wireProjectMenuDragDrop();
+}
+
+// ── Workspace drag-and-drop reorder ──────────────────────────────────────────
+function wireProjectMenuDragDrop(): void {
+  const menu = document.getElementById('project-menu');
+  if (!menu) return;
+  const items = menu.querySelectorAll<HTMLElement>('.project-menu-item[data-project-id]');
+  let draggingId: string | null = null;
+
+  items.forEach(el => {
+    el.addEventListener('dragstart', (e: DragEvent) => {
+      draggingId = el.dataset.projectId || null;
+      el.classList.add('project-menu-item--dragging');
+      // Mark the menu so hover styles can quiet down while dragging.
+      menu.classList.add('project-menu--dragging');
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = 'move';
+        // Some browsers require setData to start a drag.
+        e.dataTransfer.setData('text/plain', el.dataset.projectId || '');
+      }
+    });
+
+    el.addEventListener('dragend', () => {
+      el.classList.remove('project-menu-item--dragging');
+      menu.classList.remove('project-menu--dragging');
+      menu.querySelectorAll('.project-menu-item--drop-before, .project-menu-item--drop-after')
+        .forEach(n => n.classList.remove('project-menu-item--drop-before', 'project-menu-item--drop-after'));
+      draggingId = null;
+    });
+
+    el.addEventListener('dragover', (e: DragEvent) => {
+      if (!draggingId || el.dataset.projectId === draggingId) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+      const rect = el.getBoundingClientRect();
+      const before = (e.clientY - rect.top) < rect.height / 2;
+      el.classList.toggle('project-menu-item--drop-before', before);
+      el.classList.toggle('project-menu-item--drop-after', !before);
+    });
+
+    el.addEventListener('dragleave', () => {
+      el.classList.remove('project-menu-item--drop-before', 'project-menu-item--drop-after');
+    });
+
+    el.addEventListener('drop', (e: DragEvent) => {
+      e.preventDefault();
+      if (!draggingId || el.dataset.projectId === draggingId) return;
+      const targetId = el.dataset.projectId;
+      if (!targetId) return;
+      const rect = el.getBoundingClientRect();
+      const before = (e.clientY - rect.top) < rect.height / 2;
+      reorderWorkspace(draggingId, targetId, before);
+    });
+  });
+}
+
+async function reorderWorkspace(sourceId: string, targetId: string, insertBefore: boolean): Promise<void> {
+  const ids = state.projects.map(p => p.id);
+  const fromIdx = ids.indexOf(sourceId);
+  const toIdx = ids.indexOf(targetId);
+  if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return;
+
+  // Compute the new order by removing source then re-inserting at target position.
+  const newOrder = [...state.projects];
+  const [moved] = newOrder.splice(fromIdx, 1);
+  let insertAt = newOrder.indexOf(state.projects[toIdx]);
+  if (!insertBefore) insertAt += 1;
+  newOrder.splice(insertAt, 0, moved);
+
+  // Optimistic UI update.
+  const previous = state.projects;
+  state.projects = newOrder;
+  renderProjectSwitcher();
+
+  try {
+    const { projects } = await api.reorderProjects(newOrder.map(p => p.id));
+    state.projects = projects;
+    renderProjectSwitcher();
+  } catch (err) {
+    // Revert on failure.
+    state.projects = previous;
+    renderProjectSwitcher();
+    showToast('Reorder failed: ' + (err as Error).message, 'error');
+  }
 }
 
 // Close project menu when clicking outside
@@ -374,10 +531,12 @@ async function switchProject(id: string): Promise<void> {
   // Close menu
   document.getElementById('project-menu')?.classList.remove('open');
 
-  // Clear current page
+  // Clear current page and tabs
   state.currentPageId = null;
   state.currentPage = null;
   state.chatMessages = [];
+  state.openTabs = [];
+  state.activeTabId = null;
 
   // Reload UI
   renderProjectSwitcher();
@@ -461,6 +620,70 @@ function openRenameProjectModal(id: string, currentName: string): void {
   if (overlay) overlay.classList.add('open');
   const input = document.getElementById('rename-project-input') as HTMLInputElement;
   if (input) { input.value = currentName; input.focus(); input.select(); }
+  renderRenameProjectLogoPreview();
+}
+
+function renderRenameProjectLogoPreview(): void {
+  const preview = document.getElementById('rename-project-logo-preview');
+  const removeBtn = document.getElementById('rename-project-logo-remove');
+  if (!preview || !_renameProjectId) return;
+  const project = state.projects.find(p => p.id === _renameProjectId);
+  if (!project) return;
+
+  const initials = (n: string) => n.slice(0, 2).toUpperCase();
+  const hue = (n: string) => {
+    let h = 0;
+    for (let i = 0; i < n.length; i++) h = (h * 31 + n.charCodeAt(i)) % 360;
+    return h;
+  };
+
+  if (project.logo) {
+    preview.classList.add('has-logo');
+    preview.removeAttribute('style');
+    preview.innerHTML = `<img src="${api.projectLogoUrl(project.id, project.logo)}" alt="${esc(project.name)}">`;
+    if (removeBtn) removeBtn.style.display = '';
+  } else {
+    preview.classList.remove('has-logo');
+    preview.style.background = project.id === 'default' ? '' : `hsl(${hue(project.name)}, 60%, 48%)`;
+    preview.textContent = initials(project.name);
+    if (removeBtn) removeBtn.style.display = 'none';
+  }
+}
+
+function triggerProjectLogoUpload(): void {
+  (document.getElementById('rename-project-logo-input') as HTMLInputElement)?.click();
+}
+
+async function handleProjectLogoUpload(e: Event): Promise<void> {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file || !_renameProjectId) return;
+  // Reset the input so re-uploading the SAME file still triggers `change`.
+  input.value = '';
+  try {
+    const { project } = await api.uploadProjectLogo(_renameProjectId, file);
+    const idx = state.projects.findIndex(p => p.id === project.id);
+    if (idx !== -1) state.projects[idx] = project;
+    renderRenameProjectLogoPreview();
+    renderProjectSwitcher();
+    showToast('Logo updated');
+  } catch (err) {
+    showToast('Upload failed: ' + (err as Error).message, 'error');
+  }
+}
+
+async function removeProjectLogo(): Promise<void> {
+  if (!_renameProjectId) return;
+  try {
+    const { project } = await api.deleteProjectLogo(_renameProjectId);
+    const idx = state.projects.findIndex(p => p.id === project.id);
+    if (idx !== -1) state.projects[idx] = project;
+    renderRenameProjectLogoPreview();
+    renderProjectSwitcher();
+    showToast('Logo removed');
+  } catch (err) {
+    showToast('Remove failed: ' + (err as Error).message, 'error');
+  }
 }
 
 function closeRenameProjectModal(): void {
@@ -534,12 +757,153 @@ function toggleTheme(): void {
   api.saveSettings({ theme: next as Settings['theme'] });
 }
 
+// ── Tabs ──────────────────────────────────────────────────────────────────────
+
+function tabStorageKey(): string {
+  return `yk-tabs-${getCurrentProjectId()}`;
+}
+function activeTabStorageKey(): string {
+  return `yk-active-tab-${getCurrentProjectId()}`;
+}
+
+function syncTabNames(): void {
+  state.openTabs = state.openTabs.map(t => {
+    const page = state.pages.find(p => p.id === t.pageId);
+    return page ? { ...t, name: page.display_name || page.name } : t;
+  });
+}
+
+function saveTabs(): void {
+  try {
+    localStorage.setItem(tabStorageKey(), JSON.stringify(state.openTabs));
+    localStorage.setItem(activeTabStorageKey(), state.activeTabId ?? '');
+  } catch { /* quota or private mode */ }
+}
+
+function loadSavedTabs(): void {
+  try {
+    const raw = localStorage.getItem(tabStorageKey());
+    const savedActiveId = localStorage.getItem(activeTabStorageKey()) ?? '';
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as AppTab[];
+    const validIds = new Set(state.pages.map(p => p.id));
+    // Refresh names from current page list, drop tabs for deleted pages
+    state.openTabs = parsed
+      .filter(t => validIds.has(t.pageId))
+      .map(t => {
+        const page = state.pages.find(p => p.id === t.pageId);
+        return { ...t, name: page ? (page.display_name || page.name) : t.name };
+      });
+    const stillExists = state.openTabs.find(t => t.id === savedActiveId);
+    state.activeTabId = stillExists ? savedActiveId : (state.openTabs[0]?.id ?? null);
+    // Do NOT set state.currentPageId here — navigateTo (called by handleHashRoute)
+    // will set it. Setting it here causes the early-return guard to skip rendering.
+  } catch { /* corrupted data */ }
+}
+
+function pageIcon(page: PageNode | undefined): string {
+  const yk = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+  if (!page) return `<svg ${yk}><path d="M 6 3 H 14 L 19 8 V 21 H 6 Z"/><path d="M 14 3 V 8 H 19"/></svg>`;
+  if (page.type === 'folder') return `<svg ${yk}><path d="M 3 7 V 19 H 21 V 9 H 11 L 9 7 H 3 Z"/></svg>`;
+  if (page.file_type === 'html') return `<svg ${yk}><path d="M 6 3 H 14 L 19 8 V 21 H 6 Z"/><path d="M 14 3 V 8 H 19"/><path d="M 9 12 H 16"/><path d="M 9 15 H 13"/></svg>`;
+  return `<svg ${yk}><path d="M 6 3 H 14 L 19 8 V 21 H 6 Z"/><path d="M 14 3 V 8 H 19"/><path d="M 9 12 H 16"/><path d="M 9 15 H 16"/><path d="M 9 18 H 13"/></svg>`;
+}
+
+function renderTabBar(): void {
+  const bar = $('tab-bar');
+  if (!state.openTabs.length) {
+    bar.style.display = 'none';
+    return;
+  }
+  bar.style.display = '';
+  const multiTab = state.openTabs.length > 1;
+  bar.innerHTML = state.openTabs.map(tab => {
+    const isActive = tab.id === state.activeTabId;
+    const page = state.pages.find(p => p.id === tab.pageId);
+    const icon = pageIcon(page);
+    return `
+      <div class="tab${isActive ? ' active' : ''}" onclick="switchTab('${tab.id}')">
+        <span class="tab-icon">${icon}</span>
+        <span class="tab-name">${esc(tab.name)}</span>
+        ${multiTab ? `<button class="tab-close" onclick="closeTab('${tab.id}');event.stopPropagation()" title="Close tab">×</button>` : ''}
+      </div>`;
+  }).join('') + `<button class="tab-new-btn" onclick="openNewTab()" title="New tab">+</button>`;
+}
+
+function switchTab(tabId: string): void {
+  const tab = state.openTabs.find(t => t.id === tabId);
+  if (!tab || tabId === state.activeTabId) return;
+
+  if (state.wysiwyg) {
+    clearTimeout(saveTimer as ReturnType<typeof setTimeout>);
+    state.wysiwyg = null;
+  }
+
+  state.activeTabId = tabId;
+  state.currentPageId = tab.pageId;
+  window.location.hash = `page/${tab.pageId}`;
+  saveTabs();
+  void renderPage(tab.pageId);
+  renderSidebar();
+  renderTabBar();
+}
+
+async function closeTab(tabId: string): Promise<void> {
+  const idx = state.openTabs.findIndex(t => t.id === tabId);
+  if (idx === -1) return;
+
+  const wasActive = tabId === state.activeTabId;
+  state.openTabs = state.openTabs.filter(t => t.id !== tabId);
+
+  if (wasActive) {
+    if (state.wysiwyg) {
+      clearTimeout(saveTimer as ReturnType<typeof setTimeout>);
+      state.wysiwyg = null;
+    }
+    const nextIdx = Math.min(idx, state.openTabs.length - 1);
+    if (nextIdx >= 0) {
+      const next = state.openTabs[nextIdx];
+      state.activeTabId = next.id;
+      state.currentPageId = next.pageId;
+      window.location.hash = `page/${next.pageId}`;
+      saveTabs();
+      await renderPage(next.pageId);
+      renderSidebar();
+    } else {
+      state.activeTabId = null;
+      state.currentPageId = null;
+      state.currentPage = null;
+      window.location.hash = '';
+      saveTabs();
+      showWelcome();
+      renderSidebar();
+    }
+  } else {
+    saveTabs();
+  }
+
+  renderTabBar();
+}
+
+async function openNewTab(): Promise<void> {
+  // Navigate to the first page in a fresh tab (or welcome if no pages)
+  const firstPage = state.pages.find(p => !p.parent_id);
+  if (firstPage) {
+    await navigateTo(firstPage.id, true);
+  } else {
+    showWelcome();
+  }
+}
+
 // ── Pages ─────────────────────────────────────────────────────────────────────
 async function loadPages(): Promise<void> {
   try {
     const { pages } = await api.getFlat();
     state.pages = pages;
+    loadSavedTabs();
+    syncTabNames();
     renderSidebar();
+    renderTabBar();
   } catch (err) {
     showToast('Failed to load pages: ' + (err as Error).message, 'error');
   }
@@ -603,15 +967,15 @@ function buildNavItem(page: NavPageNode, showNum: boolean, num?: number): HTMLEl
     item.innerHTML = `
       <div class="nav-item-inner">
         ${numStr ? `<span class="nav-num">${numStr}</span>` : ''}
-        <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor">
-          <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/>
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M 3 7 V 19 H 21 V 9 H 11 L 9 7 H 3 Z"/>
         </svg>
         <span class="nav-name">${esc(displayName)}</span>
 
       </div>
       ${hasChildren ? `
         <button class="nav-expand-btn${isExpanded ? ' open' : ''}" data-folder-id="${page.id}">
-          <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"/></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 9 6 L 15 12 L 9 18"/></svg>
         </button>
       ` : ''}
     `;
@@ -620,7 +984,7 @@ function buildNavItem(page: NavPageNode, showNum: boolean, num?: number): HTMLEl
       if (isExpandBtn) {
         toggleFolder(page.id);
       } else {
-        navigateTo(page.id);
+        void navigateTo(page.id, e.metaKey || e.ctrlKey);
       }
     });
     item.addEventListener('contextmenu', e => showCtxMenu(e, page));
@@ -640,8 +1004,8 @@ function buildNavItem(page: NavPageNode, showNum: boolean, num?: number): HTMLEl
     item.dataset.pageId = page.id;
     const ext = page.file_type || 'md';
     const icon = ext === 'html'
-      ? `<svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4.083 9h1.946c.089-1.546.383-2.97.837-4.118A6.004 6.004 0 004.083 9zM10 2a8 8 0 100 16A8 8 0 0010 2zm0 2c-.076 0-.232.032-.465.262-.238.234-.497.623-.737 1.182-.389.907-.673 2.142-.766 3.556h3.936c-.093-1.414-.377-2.649-.766-3.556-.24-.56-.5-.948-.737-1.182C10.232 4.032 10.076 4 10 4zm3.971 5c-.089-1.546-.383-2.97-.837-4.118A6.004 6.004 0 0115.917 9h-1.946zm-2.003 2H8.032c.093 1.414.377 2.649.766 3.556.24.56.5.948.737 1.182.233.23.389.262.465.262.076 0 .232-.032.465-.262.238-.234.498-.623.737-1.182.389-.907.673-2.142.766-3.556zm1.166 4.118c.454-1.147.748-2.572.837-4.118h1.946a6.004 6.004 0 01-2.783 4.118zm-6.268 0C6.412 13.97 6.118 12.546 6.03 11H4.083a6.004 6.004 0 002.783 4.118z" clip-rule="evenodd"/></svg>`
-      : `<svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clip-rule="evenodd"/></svg>`;
+      ? `<svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 6 3 H 14 L 19 8 V 21 H 6 Z"/><path d="M 14 3 V 8 H 19"/><path d="M 9 12 H 16"/><path d="M 9 15 H 13"/></svg>`
+      : `<svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 6 3 H 14 L 19 8 V 21 H 6 Z"/><path d="M 14 3 V 8 H 19"/><path d="M 9 12 H 16"/><path d="M 9 15 H 16"/><path d="M 9 18 H 13"/></svg>`;
     item.innerHTML = `
       <div class="nav-item-inner">
         ${numStr ? `<span class="nav-num">${numStr}</span>` : ''}
@@ -650,7 +1014,7 @@ function buildNavItem(page: NavPageNode, showNum: boolean, num?: number): HTMLEl
         <span class="nav-count">${ext}</span>
       </div>
     `;
-    item.addEventListener('click', () => navigateTo(page.id));
+    item.addEventListener('click', (e) => void navigateTo(page.id, e.metaKey || e.ctrlKey));
     item.addEventListener('contextmenu', e => showCtxMenu(e, page));
     return item;
   }
@@ -663,10 +1027,10 @@ function buildSubNavItem(page: NavPageNode): HTMLElement {
   item.className = 'nav-sub-item';
   item.dataset.pageId = page.id;
   const icon = isFolder
-    ? `<svg class="nav-sub-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/></svg>`
-    : `<svg class="nav-sub-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clip-rule="evenodd"/></svg>`;
+    ? `<svg class="nav-sub-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 3 7 V 19 H 21 V 9 H 11 L 9 7 H 3 Z"/></svg>`
+    : `<svg class="nav-sub-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 6 3 H 14 L 19 8 V 21 H 6 Z"/><path d="M 14 3 V 8 H 19"/><path d="M 9 12 H 16"/><path d="M 9 15 H 16"/><path d="M 9 18 H 13"/></svg>`;
   item.innerHTML = `${icon}<span class="nav-sub-name">${esc(displayName)}</span>`;
-  item.addEventListener('click', () => navigateTo(page.id));
+  item.addEventListener('click', (e) => void navigateTo(page.id, e.metaKey || e.ctrlKey));
   item.addEventListener('contextmenu', e => showCtxMenu(e, page));
   return item;
 }
@@ -693,35 +1057,53 @@ function highlightActive(): void {
 }
 
 // ── Navigation ────────────────────────────────────────────────────────────────
-async function navigateTo(pageId: string): Promise<void> {
-  if (pageId === state.currentPageId) return;
+async function navigateTo(pageId: string, newTab = false): Promise<void> {
+  if (!newTab && pageId === state.currentPageId) return;
 
   if (state.wysiwyg) {
     clearTimeout(saveTimer as ReturnType<typeof setTimeout>);
     state.wysiwyg = null;
   }
 
+  const page = state.pages.find(p => p.id === pageId);
+  const name = page ? (page.display_name || page.name) : 'Page';
+
+  if (newTab || !state.activeTabId) {
+    const tabId = `tab-${Date.now()}`;
+    state.openTabs = [...state.openTabs, { id: tabId, pageId, name }];
+    state.activeTabId = tabId;
+  } else {
+    state.openTabs = state.openTabs.map(t =>
+      t.id === state.activeTabId ? { ...t, pageId, name } : t
+    );
+  }
+
   state.currentPageId = pageId;
   window.location.hash = `page/${pageId}`;
 
-  const page = state.pages.find(p => p.id === pageId);
-  if (page?.parent_id) {
-    state.expandedFolders.add(page.parent_id);
-  }
-  // Auto-expand folders when selected
-  if (page?.type === 'folder') {
-    state.expandedFolders.add(pageId);
-  }
+  if (page?.parent_id) state.expandedFolders.add(page.parent_id);
+  if (page?.type === 'folder') state.expandedFolders.add(pageId);
 
+  saveTabs();
   await renderPage(pageId);
   renderSidebar();
+  renderTabBar();
 }
 
 function handleHashRoute(): void {
   const hash = window.location.hash;
   const match = hash.match(/^#page\/(.+)$/);
   if (match) {
-    navigateTo(match[1]);
+    void navigateTo(match[1]);
+  } else if (state.activeTabId) {
+    // No hash but restored tabs exist — render the active tab's page
+    const activeTab = state.openTabs.find(t => t.id === state.activeTabId);
+    if (activeTab) {
+      window.location.hash = `page/${activeTab.pageId}`;
+      void navigateTo(activeTab.pageId);
+    } else {
+      showWelcome();
+    }
   } else {
     showWelcome();
   }
@@ -729,10 +1111,17 @@ function handleHashRoute(): void {
 
 // ── Page rendering ────────────────────────────────────────────────────────────
 async function renderPage(pageId: string): Promise<void> {
+  // Close find bar when navigating away
+  closeFindBar();
+  $('find-bar').style.display = 'none';
+
   const content = $('content-area');
   content.className = 'content-area';
   content.innerHTML = `<div class="fade-in" style="text-align:center;padding:60px 0;color:var(--text-dim);"><div>Loading…</div></div>`;
   hideSaveState();
+  // If a Monaco HTML editor was open from a previous page, free its resources
+  // — replacing innerHTML above orphans the DOM but Monaco's listeners persist.
+  disposeHtmlMonacoEditor();
 
   try {
     const { page } = await api.getPage(pageId);
@@ -746,7 +1135,7 @@ async function renderPage(pageId: string): Promise<void> {
     $('html-edit-btn').classList.toggle('hidden', !isHtml);
     if (isHtml) {
       // Reset edit btn label on each navigation
-      $('html-edit-btn').textContent = '✏️ Edit HTML';
+      $('html-edit-btn').innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;display:inline-block;vertical-align:-2px;margin-right:4px"><path d="M 4 20 L 8 20 L 18 10 L 14 6 L 4 16 Z"/><path d="M 13 7 L 17 11"/></svg>Edit HTML';
     }
 
     if (page.type === 'folder') {
@@ -886,10 +1275,10 @@ function renderWysiwygEditor(page: PageNode, container: HTMLElement): void {
 
         <!-- History -->
         <button class="tb-btn" id="tb-undo" title="Undo (⌘Z)">
-          <i data-lucide="undo-2"></i>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 3 7 V 13 H 9"/><path d="M 21 17 a 9 9 0 0 0 -15 -6.7 L 3 13"/></svg>
         </button>
         <button class="tb-btn" id="tb-redo" title="Redo (⌘⇧Z)">
-          <i data-lucide="redo-2"></i>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 21 7 V 13 H 15"/><path d="M 3 17 a 9 9 0 0 1 15 -6.7 L 21 13"/></svg>
         </button>
 
         <span class="tb-sep"></span>
@@ -898,7 +1287,7 @@ function renderWysiwygEditor(page: PageNode, container: HTMLElement): void {
         <div class="tb-dropdown" id="tb-heading-wrap">
           <button class="tb-btn tb-dropdown-btn" id="tb-heading" title="Text style">
             <span class="tb-heading-label" id="tb-heading-label">Text</span>
-            <i data-lucide="chevron-down" class="tb-caret"></i>
+            <svg class="tb-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 6 9 L 12 15 L 18 9"/></svg>
           </button>
           <div class="tb-dropdown-menu" id="tb-heading-menu">
             <button class="tb-menu-item" data-level="1"><span class="tb-menu-badge">H1</span>Heading 1</button>
@@ -914,38 +1303,38 @@ function renderWysiwygEditor(page: PageNode, container: HTMLElement): void {
 
         <!-- Inline marks -->
         <button class="tb-btn" id="tb-bold" title="Bold (⌘B)">
-          <i data-lucide="bold"></i>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 7 4 H 13 a 4 4 0 0 1 0 8 H 7 V 4 Z"/><path d="M 7 12 H 14 a 4 4 0 0 1 0 8 H 7 V 12 Z"/></svg>
         </button>
         <button class="tb-btn" id="tb-italic" title="Italic (⌘I)">
-          <i data-lucide="italic"></i>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 8 5 H 17"/><path d="M 7 19 H 16"/><path d="M 14 5 L 10 19"/></svg>
         </button>
         <button class="tb-btn" id="tb-underline" title="Underline (⌘U)">
-          <i data-lucide="underline"></i>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 6 4 V 13 a 6 6 0 0 0 12 0 V 4"/><path d="M 4 20 H 20"/></svg>
         </button>
         <button class="tb-btn" id="tb-strike" title="Strikethrough">
-          <i data-lucide="strikethrough"></i>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 17 7 c 0 -2 -3 -3 -5 -3 c -3 0 -5 1 -5 3 c 0 4 10 2 10 6 c 0 2 -3 3 -5 3 c -2 0 -5 -1 -5 -3"/><path d="M 4 12 H 20"/></svg>
         </button>
         <button class="tb-btn" id="tb-code" title="Inline code">
-          <i data-lucide="code"></i>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 9 8 L 5 12 L 9 16"/><path d="M 15 8 L 19 12 L 15 16"/><path d="M 13 6 L 11 18"/></svg>
         </button>
 
         <span class="tb-sep"></span>
 
         <!-- Block nodes -->
         <button class="tb-btn" id="tb-bullet" title="Bullet list">
-          <i data-lucide="list"></i>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="1.5" fill="currentColor"/><path d="M 9 6 H 20"/><circle cx="5" cy="12" r="1.5" fill="currentColor"/><path d="M 9 12 H 20"/><circle cx="5" cy="18" r="1.5" fill="currentColor"/><path d="M 9 18 H 20"/></svg>
         </button>
         <button class="tb-btn" id="tb-ordered" title="Numbered list">
-          <i data-lucide="list-ordered"></i>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 10 6 H 21"/><path d="M 10 12 H 21"/><path d="M 10 18 H 21"/><path d="M 4 4 L 4 9"/><path d="M 2.5 5 L 4 4"/><path d="M 2 13 a 2 1.5 0 0 1 4 0 L 2 17 H 6"/><path d="M 2 19 a 2 1.5 0 0 1 4 0 a 2 1.5 0 0 1 -4 0 H 6"/></svg>
         </button>
         <button class="tb-btn" id="tb-task" title="Task list">
-          <i data-lucide="list-checks"></i>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="5" height="5" rx="1"/><path d="M 4 6.5 L 5.2 7.7 L 7 5.5"/><path d="M 11 6.5 H 20"/><rect x="3" y="11" width="5" height="5" rx="1"/><path d="M 11 13.5 H 20"/><rect x="3" y="18" width="5" height="5" rx="1"/><path d="M 11 20.5 H 20"/></svg>
         </button>
         <button class="tb-btn" id="tb-blockquote" title="Blockquote">
-          <i data-lucide="quote"></i>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path fill="currentColor" stroke="none" d="M 4 7 H 9 V 13 a 4 4 0 0 1 -5 4 V 14 a 1.5 1.5 0 0 0 1.5 -1.5 V 13 H 4 Z"/><path fill="currentColor" stroke="none" d="M 13 7 H 18 V 13 a 4 4 0 0 1 -5 4 V 14 a 1.5 1.5 0 0 0 1.5 -1.5 V 13 H 13 Z"/></svg>
         </button>
         <button class="tb-btn" id="tb-codeblock" title="Code block">
-          <i data-lucide="terminal-square"></i>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M 8 9 L 5 12 L 8 15"/><path d="M 16 9 L 19 12 L 16 15"/><path d="M 12 8 L 10 16"/></svg>
         </button>
 
         <span class="tb-sep"></span>
@@ -953,7 +1342,7 @@ function renderWysiwygEditor(page: PageNode, container: HTMLElement): void {
         <!-- Link -->
         <div class="tb-dropdown" id="tb-link-wrap">
           <button class="tb-btn" id="tb-link" title="Link (⌘K)">
-            <i data-lucide="link"></i>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 10 14 a 4 4 0 0 1 0 -6 L 13 5 a 4 4 0 0 1 6 6 L 17 13"/><path d="M 14 10 a 4 4 0 0 1 0 6 L 11 19 a 4 4 0 0 1 -6 -6 L 7 11"/></svg>
           </button>
           <div class="tb-dropdown-menu tb-link-menu" id="tb-link-menu">
             <!-- Tabs -->
@@ -980,7 +1369,7 @@ function renderWysiwygEditor(page: PageNode, container: HTMLElement): void {
         </div>
 
         <button class="tb-btn" id="tb-hr" title="Horizontal rule">
-          <i data-lucide="minus"></i>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 3 12 H 21"/><circle cx="3" cy="12" r="1" fill="currentColor"/><circle cx="21" cy="12" r="1" fill="currentColor"/></svg>
         </button>
 
       </div>
@@ -1117,16 +1506,6 @@ function buildEditorToolbar(editor: TipTapEditor): void {
   const toolbar = document.getElementById('editor-toolbar');
   if (!toolbar) return;
 
-  // Render Lucide icons inside the toolbar
-  const lucide = (window as unknown as { lucide?: { createIcons: (opts?: { nameAttr?: string; attrs?: Record<string, string> }) => void } }).lucide;
-  if (lucide?.createIcons) {
-    lucide.createIcons({
-      nameAttr: 'data-lucide',
-      attrs: { 'stroke-width': '1.8' },
-    });
-  }
-
-
   // ── Active state refresh ──────────────────────────────────────────────────
   const marks = ['bold', 'italic', 'underline', 'strike', 'code'];
   const blocks = ['bulletList', 'orderedList', 'taskList', 'blockquote', 'codeBlock'];
@@ -1260,8 +1639,11 @@ function buildEditorToolbar(editor: TipTapEditor): void {
       }
 
       // Icon — folder or file
-      const icon = document.createElement('i');
-      icon.setAttribute('data-lucide', p.type === 'folder' ? 'folder' : 'file-text');
+      const icon = document.createElement('span');
+      icon.className = 'tb-page-item-icon';
+      icon.innerHTML = p.type === 'folder'
+        ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 3 7 V 19 H 21 V 9 H 11 L 9 7 H 3 Z"/></svg>`
+        : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 6 3 H 14 L 19 8 V 21 H 6 Z"/><path d="M 14 3 V 8 H 19"/><path d="M 9 12 H 16"/><path d="M 9 15 H 16"/></svg>`;
       item.appendChild(icon);
 
       // Label + path
@@ -1332,9 +1714,6 @@ function buildEditorToolbar(editor: TipTapEditor): void {
       traverse('', 0);
     }
 
-    // Re-run Lucide for the newly created icons
-    const lucide = (window as unknown as { lucide?: { createIcons: (opts?: Record<string, unknown>) => void } }).lucide;
-    lucide?.createIcons?.({ nameAttr: 'data-lucide', attrs: { 'stroke-width': '1.8' } });
   }
 
   pageSearch?.addEventListener('input', () => populatePageList(pageSearch.value));
@@ -1407,6 +1786,159 @@ function renderHtmlEditor(page: PageNode, container: HTMLElement): void {
   frame.srcdoc = page.content || '<p>Empty page</p>';
 }
 
+// Lazy-load Monaco editor. The CDN loader script (in index.html) exposes a
+// global `require` function that we configure with the correct `vs` path,
+// then ask it for the editor.main module. Resolves to `window.monaco`.
+let _monacoLoadPromise: Promise<unknown> | null = null;
+function loadMonaco(): Promise<unknown> {
+  if (_monacoLoadPromise) return _monacoLoadPromise;
+  _monacoLoadPromise = new Promise((resolve, reject) => {
+    const w = window as unknown as {
+      monaco?: unknown;
+      require?: { config: (o: unknown) => void } & ((mods: string[], cb: () => void, err?: (e: Error) => void) => void);
+    };
+    if (w.monaco) { resolve(w.monaco); return; }
+    if (!w.require) { reject(new Error('Monaco loader (loader.js) not available')); return; }
+    w.require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs' } });
+    w.require(['vs/editor/editor.main'], () => resolve((window as { monaco?: unknown }).monaco), reject);
+  });
+  return _monacoLoadPromise;
+}
+
+interface MonacoEditorInstance {
+  dispose: () => void;
+  getValue: () => string;
+  focus: () => void;
+  onDidChangeModelContent: (cb: () => void) => void;
+  addCommand: (k: number, cb: () => void) => void;
+}
+let _htmlMonacoEditor: MonacoEditorInstance | null = null;
+
+function disposeHtmlMonacoEditor(): void {
+  if (_htmlMonacoEditor) {
+    try { _htmlMonacoEditor.dispose(); } catch { /* ignore */ }
+    _htmlMonacoEditor = null;
+  }
+}
+
+// ── Full-screen code file editor ──────────────────────────────────────────────
+
+const CODE_EXTS = new Set([
+  'js', 'jsx', 'mjs', 'cjs', 'ts', 'tsx',
+  'py', 'rb', 'go', 'rs', 'java', 'kt', 'swift', 'php', 'cs', 'cpp', 'cc', 'c', 'h', 'hpp',
+  'sh', 'bash', 'zsh', 'fish', 'ps1', 'bat',
+  'css', 'scss', 'sass', 'less',
+  'sql', 'graphql', 'gql', 'proto',
+  'json', 'yaml', 'yml', 'toml', 'xml', 'html', 'htm', 'md', 'markdown',
+  'env', 'ini', 'conf', 'cfg',
+  'dockerfile', 'makefile', 'gitignore', 'editorconfig',
+]);
+
+const EXT_TO_MONACO_LANG: Record<string, string> = {
+  js: 'javascript', jsx: 'javascript', mjs: 'javascript', cjs: 'javascript',
+  ts: 'typescript', tsx: 'typescript',
+  py: 'python', rb: 'ruby', go: 'go', rs: 'rust',
+  java: 'java', kt: 'kotlin', swift: 'swift', php: 'php',
+  cs: 'csharp', cpp: 'cpp', cc: 'cpp', c: 'c', h: 'c', hpp: 'cpp',
+  sh: 'shell', bash: 'shell', zsh: 'shell', fish: 'shell', ps1: 'powershell', bat: 'bat',
+  css: 'css', scss: 'scss', sass: 'scss', less: 'less',
+  sql: 'sql', graphql: 'graphql', gql: 'graphql', proto: 'protobuf',
+  json: 'json', yaml: 'yaml', yml: 'yaml', toml: 'toml', xml: 'xml',
+  html: 'html', htm: 'html', md: 'markdown', markdown: 'markdown',
+};
+
+let _codeEditorAssetId: string | null = null;
+let _codeMonacoEditor: MonacoEditorInstance | null = null;
+
+function isCodeFile(filename: string): boolean {
+  const ext = filename.split('.').pop()?.toLowerCase() ?? '';
+  return CODE_EXTS.has(ext);
+}
+
+async function openCodeFileEditor(id: string, name: string, url: string): Promise<void> {
+  _codeEditorAssetId = id;
+
+  const overlay = $('code-editor-overlay');
+  const host = $('code-editor-host');
+  const filenameEl = $('code-editor-filename');
+
+  filenameEl.textContent = name;
+  host.innerHTML = '<div style="padding:32px;color:var(--text-dim);font-size:14px;">Loading…</div>';
+  overlay.style.display = 'flex';
+
+  // Dispose any previous instance
+  if (_codeMonacoEditor) {
+    try { _codeMonacoEditor.dispose(); } catch { /* ignore */ }
+    _codeMonacoEditor = null;
+  }
+
+  try {
+    const res = await fetch(url);
+    const text = await res.text();
+
+    const monaco = await loadMonaco() as {
+      editor: {
+        create: (el: HTMLElement, opts: Record<string, unknown>) => MonacoEditorInstance;
+      };
+      KeyMod: { CtrlCmd: number };
+      KeyCode: { KeyS: number };
+    };
+
+    host.innerHTML = '';
+    const ext = name.split('.').pop()?.toLowerCase() ?? '';
+    const language = EXT_TO_MONACO_LANG[ext] ?? 'plaintext';
+
+    _codeMonacoEditor = monaco.editor.create(host, {
+      value: text,
+      language,
+      theme: state.theme === 'dark' ? 'vs-dark' : 'vs',
+      automaticLayout: true,
+      fontSize: 14,
+      minimap: { enabled: true },
+      scrollBeyondLastLine: false,
+      tabSize: 2,
+      wordWrap: 'off',
+    });
+
+    // Ctrl/Cmd+S to save
+    _codeMonacoEditor.addCommand(
+      (monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS) as unknown as number,
+      () => void saveCodeFile()
+    );
+
+    _codeMonacoEditor.focus();
+  } catch (err) {
+    host.innerHTML = `<div style="padding:32px;color:var(--danger);font-size:14px;">Failed to load file: ${(err as Error).message}</div>`;
+  }
+}
+
+function closeCodeFileEditor(): void {
+  const overlay = $('code-editor-overlay');
+  overlay.style.display = 'none';
+  if (_codeMonacoEditor) {
+    try { _codeMonacoEditor.dispose(); } catch { /* ignore */ }
+    _codeMonacoEditor = null;
+  }
+  _codeEditorAssetId = null;
+}
+
+async function saveCodeFile(): Promise<void> {
+  if (!_codeEditorAssetId || !_codeMonacoEditor) return;
+  const content = _codeMonacoEditor.getValue();
+  const btn = $('code-editor-save-btn');
+  try {
+    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;display:inline-block;vertical-align:-2px;margin-right:4px"><path d="M 12 4 V 16"/><path d="M 7 12 L 12 17 L 17 12"/><path d="M 4 20 H 20"/></svg>Saving…';
+    btn.setAttribute('disabled', 'true');
+    await api.updateAssetContent(_codeEditorAssetId, content);
+    showToast('File saved');
+  } catch (err) {
+    showToast('Save failed: ' + (err as Error).message, 'error');
+  } finally {
+    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;display:inline-block;vertical-align:-2px;margin-right:4px"><path d="M 12 4 V 16"/><path d="M 7 12 L 12 17 L 17 12"/><path d="M 4 20 H 20"/></svg>Save';
+    btn.removeAttribute('disabled');
+  }
+}
+
 function toggleHtmlEditMode(): void {
   const container = $('content-area');
   const page = state.currentPage;
@@ -1416,29 +1948,78 @@ function toggleHtmlEditMode(): void {
 
   if (isEditing) {
     // Switch back to preview-only
+    disposeHtmlMonacoEditor();
     container.className = 'content-area fade-in';
     container.innerHTML = `
       <iframe class="html-preview-frame" id="html-preview-frame" style="width:100%;height:100%;border:none;display:block"></iframe>
     `;
     ($('html-preview-frame') as HTMLIFrameElement).srcdoc = page.content || '<p>Empty page</p>';
-    $('html-edit-btn').textContent = '✏️ Edit HTML';
-  } else {
-    // Switch to split editor + preview
-    container.className = 'content-area editor-mode fade-in';
-    container.innerHTML = `
-      <div class="editor-pane html-editor-wrap" style="flex:1">
-        <div class="editor-pane-label">✏️ html source</div>
-        <textarea class="editor-textarea" id="editor-textarea" placeholder="Write HTML…" spellcheck="false" style="flex:1">${esc(page.content || '')}</textarea>
-      </div>
-      <div class="editor-pane html-editor-wrap" style="flex:1;border-right:none">
-        <div class="editor-pane-label">👁 live preview</div>
-        <iframe class="html-preview-frame" id="html-preview-frame"></iframe>
-      </div>
-    `;
-    const textarea = $('editor-textarea') as HTMLTextAreaElement;
-    const frame = $('html-preview-frame') as HTMLIFrameElement;
+    $('html-edit-btn').innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;display:inline-block;vertical-align:-2px;margin-right:4px"><path d="M 4 20 L 8 20 L 18 10 L 14 6 L 4 16 Z"/><path d="M 13 7 L 17 11"/></svg>Edit HTML';
+    return;
+  }
+
+  // Switch to split editor + preview. The left pane hosts Monaco; the right
+  // pane is the live preview iframe.
+  container.className = 'content-area editor-mode fade-in';
+  container.innerHTML = `
+    <div class="editor-pane html-editor-wrap" style="flex:1">
+      <div class="editor-pane-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;display:inline-block;vertical-align:-2px;margin-right:4px"><path d="M 4 20 L 8 20 L 18 10 L 14 6 L 4 16 Z"/><path d="M 13 7 L 17 11"/></svg>html source</div>
+      <div id="editor-monaco-host" style="flex:1;min-height:0"></div>
+    </div>
+    <div class="editor-pane html-editor-wrap" style="flex:1;border-right:none">
+      <div class="editor-pane-label">👁 live preview</div>
+      <iframe class="html-preview-frame" id="html-preview-frame"></iframe>
+    </div>
+  `;
+  const host = $('editor-monaco-host');
+  const frame = $('html-preview-frame') as HTMLIFrameElement;
+  frame.srcdoc = page.content || '<p>Empty page</p>';
+  $('html-edit-btn').textContent = '👁 Preview';
+
+  void mountHtmlEditor(host, page, frame);
+}
+
+async function mountHtmlEditor(host: HTMLElement, page: PageNode, frame: HTMLIFrameElement): Promise<void> {
+  try {
+    const monaco = await loadMonaco() as {
+      editor: {
+        create: (el: HTMLElement, opts: Record<string, unknown>) => MonacoEditorInstance;
+      };
+      KeyMod: { CtrlCmd: number };
+      KeyCode: { KeyS: number };
+    };
+    disposeHtmlMonacoEditor();
+    _htmlMonacoEditor = monaco.editor.create(host, {
+      value: page.content || '',
+      language: 'html',
+      theme: state.theme === 'dark' ? 'vs-dark' : 'vs',
+      automaticLayout: true,
+      fontSize: 14,
+      minimap: { enabled: false },
+      scrollBeyondLastLine: false,
+      tabSize: 2,
+      wordWrap: 'on',
+      formatOnPaste: true,
+      formatOnType: true,
+    });
+
+    const update = () => {
+      const value = _htmlMonacoEditor!.getValue();
+      frame.srcdoc = value || '<p>Empty page</p>';
+      debounceSave(value);
+      if (state.currentPage) state.currentPage.content = value;
+    };
+    _htmlMonacoEditor.onDidChangeModelContent(update);
+    _htmlMonacoEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+      savePage(_htmlMonacoEditor!.getValue());
+    });
+    setTimeout(() => _htmlMonacoEditor?.focus(), 50);
+  } catch {
+    // Fallback to a plain textarea if Monaco fails to load (no network, CSP block, etc).
+    host.innerHTML = `<textarea class="editor-textarea" id="editor-textarea" placeholder="Write HTML…" spellcheck="false" style="flex:1;width:100%;height:100%;border:none;outline:none;padding:10px;box-sizing:border-box;resize:none">${esc(page.content || '')}</textarea>`;
+    const textarea = host.querySelector('#editor-textarea') as HTMLTextAreaElement;
     const updateFrame = () => { frame.srcdoc = textarea.value || '<p>Empty page</p>'; };
-    textarea.addEventListener('input', () => { updateFrame(); debounceSave(textarea.value); if (page) page.content = textarea.value; });
+    textarea.addEventListener('input', () => { updateFrame(); debounceSave(textarea.value); if (state.currentPage) state.currentPage.content = textarea.value; });
     textarea.addEventListener('keydown', (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); savePage(textarea.value); }
       if (e.key === 'Tab') {
@@ -1449,9 +2030,7 @@ function toggleHtmlEditMode(): void {
         debounceSave(textarea.value);
       }
     });
-    updateFrame();
-    requestAnimationFrame(() => textarea.focus());
-    $('html-edit-btn').textContent = '👁 Preview';
+    setTimeout(() => textarea.focus(), 50);
   }
 }
 
@@ -1512,31 +2091,58 @@ function renderFolderView(page: PageNode, container: HTMLElement): void {
           <p class="folder-meta">${children.length + (page.assets?.length || 0)} item${(children.length + (page.assets?.length || 0)) !== 1 ? 's' : ''}</p>
         </div>
         <div class="folder-actions">
-          <button class="btn btn-sm btn-ghost" onclick="openNewPageModal('page','${page.id}')">📝 Add Page</button>
-          <button class="btn btn-sm btn-ghost" onclick="openNewPageModal('folder','${page.id}')">📁 Add Folder</button>
-          <button class="btn btn-sm btn-ghost" onclick="openNewPageModal('image')">🖼️ Add Image</button>
+          <button class="btn btn-sm btn-ghost" onclick="openNewPageModal('page','${page.id}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 5 3 H 13 L 18 8 V 21 H 5 Z"/><path d="M 13 3 V 8 H 18"/><path d="M 11.5 16 H 14.5"/><path d="M 13 14.5 V 17.5"/></svg> Add Page</button>
+          <button class="btn btn-sm btn-ghost" onclick="openNewPageModal('folder','${page.id}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 3 7 V 19 H 21 V 9 H 11 L 9 7 H 3 Z"/></svg> Add Folder</button>
+          <button class="btn btn-sm btn-ghost" onclick="openNewPageModal('image')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path fill="currentColor" stroke="none" d="M 16 8 Q 16.7 9.7 18.5 10.2 Q 16.7 10.7 16 12.5 Q 15.3 10.7 13.5 10.2 Q 15.3 9.7 16 8 Z"/><path d="M 4 17 L 9 13 L 13 16 L 17 13"/></svg> Add Image</button>
         </div>
       </div>
 
-      <div class="section-heading">Contents</div>
-      ${children.length ? `
-        <div class="children-grid">
-          ${children.map(child => {
-    const childName = child.display_name || child.name;
-    const ext = child.file_type || '';
-    return `
-              <div class="child-card" onclick="navigateTo('${child.id}')">
-                <div class="child-card-icon ${child.type === 'folder' ? 'folder' : ext}">
-                  ${child.type === 'folder' ? '📁' : ext === 'html' ? '🌐' : '📝'}
-                </div>
-                <div class="child-card-name">${esc(childName)}</div>
-                <div class="child-card-meta">${child.type === 'folder' ? `${(state.pages.filter(p => p.parent_id === child.id).length + ((child as any).asset_count || 0))} items` : ext.toUpperCase() || 'MD'}</div>
-                <button class="child-card-menu-btn" onclick="openChildCardMenu('${child.id}', event)" title="Actions" aria-label="Actions">⋯</button>
-              </div>
-            `;
-  }).join('')}
+      <div class="folder-search-bar">
+        <div class="folder-search-wrap">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6"/><path d="M 15.5 15.5 L 20 20"/></svg>
+          <input type="text" id="folder-search" class="folder-search-input" placeholder="Filter pages and files…" autocomplete="off">
+          <button class="folder-search-clear" id="folder-search-clear" style="display:none" title="Clear">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><path d="M 6 6 L 18 18"/><path d="M 6 18 L 18 6"/></svg>
+          </button>
         </div>
-      ` : `
+        <span class="folder-search-count" id="folder-search-count"></span>
+      </div>
+
+      ${children.length ? (() => {
+    const folders = children.filter(c => c.type === 'folder');
+    const mdPages = children.filter(c => c.type !== 'folder' && (c.file_type || 'md') === 'md');
+    const htmlPages = children.filter(c => c.type !== 'folder' && c.file_type === 'html');
+
+    const renderChildCard = (child: PageNode) => {
+      const childName = child.display_name || child.name;
+      const ext = child.file_type || '';
+      return `
+        <div class="child-card" data-filter-name="${esc(childName.toLowerCase())}" onclick="navigateTo('${child.id}')">
+          <div class="child-card-icon ${child.type === 'folder' ? 'folder' : ext}">
+            ${child.type === 'folder'
+              ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 3 7 V 19 H 21 V 9 H 11 L 9 7 H 3 Z"/></svg>`
+              : ext === 'html'
+                ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 6 3 H 14 L 19 8 V 21 H 6 Z"/><path d="M 14 3 V 8 H 19"/><path d="M 9 12 H 16"/><path d="M 9 15 H 13"/></svg>`
+                : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 6 3 H 14 L 19 8 V 21 H 6 Z"/><path d="M 14 3 V 8 H 19"/><path d="M 9 12 H 16"/><path d="M 9 15 H 16"/><path d="M 9 18 H 13"/></svg>`}
+          </div>
+          <div class="child-card-name">${esc(childName)}</div>
+          <div class="child-card-meta">${child.type === 'folder' ? `${(state.pages.filter(p => p.parent_id === child.id).length + ((child as any).asset_count || 0))} items` : ext.toUpperCase() || 'MD'}</div>
+          <button class="child-card-menu-btn" onclick="openChildCardMenu('${child.id}', event)" title="Actions" aria-label="Actions"><svg viewBox="0 0 24 24" fill="none" width="16" height="16"><circle cx="5" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="19" cy="12" r="1.5" fill="currentColor"/></svg></button>
+        </div>`;
+    };
+
+    const section = (label: string, items: PageNode[]) => `
+      <div class="folder-section">
+        <div class="section-heading">${label} · ${items.length}</div>
+        <div class="children-grid">${items.map(renderChildCard).join('')}</div>
+      </div>`;
+
+    return [
+      folders.length ? section('Folders', folders) : '',
+      mdPages.length ? section('Markdown', mdPages) : '',
+      htmlPages.length ? section('HTML', htmlPages) : '',
+    ].join('');
+  })() : `
         <div style="color:var(--text-dim);font-size:14px;padding:20px 0;">
           This folder is empty.
           <a href="#" onclick="openNewPageModal('page');return false;" style="color:var(--tomato);text-decoration:none;font-weight:600;">Add a page</a> to get started.
@@ -1548,9 +2154,81 @@ function renderFolderView(page: PageNode, container: HTMLElement): void {
     </div>
   `;
   setupUploadZone(page.id);
+
+  // Wire up the folder filter input
+  const folderSearch = document.getElementById('folder-search') as HTMLInputElement | null;
+  const folderSearchClear = document.getElementById('folder-search-clear') as HTMLButtonElement | null;
+  const folderSearchCount = document.getElementById('folder-search-count') as HTMLElement | null;
+
+  function applyFolderFilter(): void {
+    if (!folderSearch) return;
+    const q = folderSearch.value.toLowerCase().trim();
+    if (folderSearchClear) folderSearchClear.style.display = q ? '' : 'none';
+
+    let visible = 0;
+    let total = 0;
+
+    container.querySelectorAll<HTMLElement>('[data-filter-name]').forEach(card => {
+      const name = card.dataset.filterName ?? '';
+      const show = !q || name.includes(q);
+      card.style.display = show ? '' : 'none';
+      total++;
+      if (show) visible++;
+    });
+
+    // Hide entire folder-section wrappers when all their cards are filtered out
+    container.querySelectorAll<HTMLElement>('.folder-section').forEach(section => {
+      const hasVisible = Array.from(section.querySelectorAll<HTMLElement>('[data-filter-name]'))
+        .some(c => c.style.display !== 'none');
+      section.style.display = hasVisible ? '' : 'none';
+    });
+
+    if (folderSearchCount) {
+      folderSearchCount.textContent = q ? `${visible} of ${total}` : '';
+      folderSearchCount.style.color = (q && visible === 0) ? 'var(--tomato)' : '';
+    }
+  }
+
+  if (folderSearch) {
+    folderSearch.addEventListener('input', applyFolderFilter);
+    folderSearchClear?.addEventListener('click', () => {
+      folderSearch.value = '';
+      folderSearch.focus();
+      applyFolderFilter();
+    });
+  }
 }
 
 // ── Assets ────────────────────────────────────────────────────────────────────
+
+function renderFileCard(a: Asset): string {
+  const ext = (a.original_name.split('.').pop() || '').toUpperCase().slice(0, 4);
+  const sizeKb = a.size / 1024;
+  const sizeLabel = sizeKb >= 1024 ? `${(sizeKb / 1024).toFixed(1)} MB` : `${sizeKb.toFixed(1)} KB`;
+  const clickHandler = isCodeFile(a.original_name)
+    ? `openCodeFileEditor('${a.id}','${esc(a.original_name)}','${api.assetUrl(a.id)}')`
+    : `window.open('${api.assetUrl(a.id)}','_blank')`;
+  return `
+    <div class="file-asset-card" data-ext="${ext.toLowerCase()}" data-filter-name="${esc(a.original_name.toLowerCase())}" onclick="${clickHandler}">
+      <div class="file-asset-icon"><span class="file-asset-ext">${ext || 'FILE'}</span></div>
+      <div class="file-asset-info">
+        <div class="file-asset-name">${esc(a.original_name)}</div>
+        <div class="file-asset-meta">${sizeLabel}</div>
+      </div>
+      <button class="asset-menu-btn asset-menu-btn--inline" onclick="openAssetCardMenu('${a.id}', event)" title="Actions" aria-label="Actions"><svg viewBox="0 0 24 24" fill="none" width="16" height="16"><circle cx="5" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="19" cy="12" r="1.5" fill="currentColor"/></svg></button>
+    </div>`;
+}
+
+// Friendly display name for a file-extension group heading
+const EXT_GROUP_LABEL: Record<string, string> = {
+  pdf: 'PDF', doc: 'Word', docx: 'Word', xls: 'Excel', xlsx: 'Excel',
+  ppt: 'PowerPoint', pptx: 'PowerPoint', rtf: 'Rich Text',
+  zip: 'Archives', tar: 'Archives', gz: 'Archives', '7z': 'Archives', rar: 'Archives',
+  mp4: 'Video', mov: 'Video', webm: 'Video', mkv: 'Video',
+  mp3: 'Audio', wav: 'Audio', m4a: 'Audio', ogg: 'Audio', flac: 'Audio',
+  txt: 'Text', csv: 'CSV',
+};
+
 function renderAssetsSection(page: PageNode): string {
   const assets = page.assets || [];
   if (!assets.length) return '';
@@ -1558,45 +2236,47 @@ function renderAssetsSection(page: PageNode): string {
   const imgs = assets.filter((a: Asset) => a.mime_type?.startsWith('image/'));
   const files = assets.filter((a: Asset) => !a.mime_type?.startsWith('image/'));
 
+  // Group non-image files by lowercase extension, sorted alphabetically
+  const byExt = new Map<string, Asset[]>();
+  for (const a of files) {
+    const ext = (a.original_name.split('.').pop() || '').toLowerCase();
+    const key = ext || 'other';
+    if (!byExt.has(key)) byExt.set(key, []);
+    byExt.get(key)!.push(a);
+  }
+  const extGroups = [...byExt.entries()].sort(([a], [b]) => a.localeCompare(b));
+
   return `
     <div class="assets-section">
       ${imgs.length ? `
-        <div class="section-heading">Images &amp; Media · ${imgs.length}</div>
-        <div class="asset-grid">
-          ${imgs.map(a => `
-            <div class="asset-card" onclick="openLightbox('${api.assetUrl(a.id)}','${esc(a.original_name)}')">
-              <div class="asset-preview">
-                <img src="${api.assetUrl(a.id)}" alt="${esc(a.original_name)}" loading="lazy">
+        <div class="folder-section">
+          <div class="section-heading">Images &amp; Media · ${imgs.length}</div>
+          <div class="asset-grid">
+            ${imgs.map(a => `
+              <div class="asset-card" data-filter-name="${esc(a.original_name.toLowerCase())}" onclick="openLightbox('${api.assetUrl(a.id)}','${esc(a.original_name)}')">
+                <div class="asset-preview">
+                  <img src="${api.assetUrl(a.id)}" alt="${esc(a.original_name)}" loading="lazy">
+                </div>
+                <div class="asset-info">
+                  <div class="asset-name">${esc(a.original_name)}</div>
+                  <div class="asset-type">${(a.size / 1024).toFixed(1)} KB</div>
+                </div>
+                <button class="asset-menu-btn" onclick="openAssetCardMenu('${a.id}', event)" title="Actions" aria-label="Actions"><svg viewBox="0 0 24 24" fill="none" width="16" height="16"><circle cx="5" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="19" cy="12" r="1.5" fill="currentColor"/></svg></button>
               </div>
-              <div class="asset-info">
-                <div class="asset-name">${esc(a.original_name)}</div>
-                <div class="asset-type">${(a.size / 1024).toFixed(1)} KB</div>
-              </div>
-              <button class="asset-menu-btn" onclick="openAssetCardMenu('${a.id}', event)" title="Actions" aria-label="Actions">⋯</button>
-            </div>
-          `).join('')}
+            `).join('')}
+          </div>
         </div>
       ` : ''}
-      ${files.length ? `
-        <div class="section-heading" style="margin-top:${imgs.length ? '24px' : 0}">Files · ${files.length}</div>
-        <div class="file-asset-grid">
-          ${files.map(a => {
-    const ext = (a.original_name.split('.').pop() || '').toUpperCase().slice(0, 4);
-    const sizeKb = a.size / 1024;
-    const sizeLabel = sizeKb >= 1024 ? `${(sizeKb / 1024).toFixed(1)} MB` : `${sizeKb.toFixed(1)} KB`;
+      ${extGroups.map(([ext, group]) => {
+    const label = EXT_GROUP_LABEL[ext] ?? ext.toUpperCase();
     return `
-            <div class="file-asset-card" data-ext="${ext.toLowerCase()}" onclick="window.open('${api.assetUrl(a.id)}','_blank')">
-              <div class="file-asset-icon"><span class="file-asset-ext">${ext || 'FILE'}</span></div>
-              <div class="file-asset-info">
-                <div class="file-asset-name">${esc(a.original_name)}</div>
-                <div class="file-asset-meta">${sizeLabel}</div>
-              </div>
-              <button class="asset-menu-btn asset-menu-btn--inline" onclick="openAssetCardMenu('${a.id}', event)" title="Actions" aria-label="Actions">⋯</button>
-            </div>
-          `;
+        <div class="folder-section">
+          <div class="section-heading">${esc(label)} · ${group.length}</div>
+          <div class="file-asset-grid">
+            ${group.map(renderFileCard).join('')}
+          </div>
+        </div>`;
   }).join('')}
-        </div>
-      ` : ''}
     </div>
   `;
 }
@@ -1614,18 +2294,18 @@ interface CardMenuItem {
 
 const SVG_ATTRS = 'xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
 const ICON = {
-  externalLink: `<svg ${SVG_ATTRS}><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>`,
-  download: `<svg ${SVG_ATTRS}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>`,
-  copy: `<svg ${SVG_ATTRS}><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>`,
-  trash: `<svg ${SVG_ATTRS}><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>`,
-  pencil: `<svg ${SVG_ATTRS}><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>`,
-  arrowRight: `<svg ${SVG_ATTRS}><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>`,
-  folderMove: `<svg ${SVG_ATTRS}><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="9" y1="14" x2="15" y2="14"/><polyline points="12 11 15 14 12 17"/></svg>`,
-  plus: `<svg ${SVG_ATTRS}><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></svg>`,
-  fileText: `<svg ${SVG_ATTRS}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>`,
-  folder: `<svg ${SVG_ATTRS}><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`,
-  chevronRight: `<svg ${SVG_ATTRS}><polyline points="9 18 15 12 9 6"/></svg>`,
-  chevronDown: `<svg ${SVG_ATTRS}><polyline points="6 9 12 15 18 9"/></svg>`,
+  externalLink: `<svg ${SVG_ATTRS}><path d="M 14 4 H 20 V 10"/><path d="M 20 4 L 12 12"/><path d="M 18 14 V 19 a 1 1 0 0 1 -1 1 H 5 a 1 1 0 0 1 -1 -1 V 7 a 1 1 0 0 1 1 -1 H 10"/></svg>`,
+  download: `<svg ${SVG_ATTRS}><path d="M 12 4 V 16"/><path d="M 7 12 L 12 17 L 17 12"/><path d="M 4 20 H 20"/></svg>`,
+  copy: `<svg ${SVG_ATTRS}><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M 5 16 V 5 a 2 2 0 0 1 2 -2 H 16"/></svg>`,
+  trash: `<svg ${SVG_ATTRS}><path d="M 4 7 H 20"/><path d="M 9 4 H 15 V 7"/><path d="M 6 7 V 19 a 2 2 0 0 0 2 2 H 16 a 2 2 0 0 0 2 -2 V 7"/><path d="M 10 11 V 17"/><path d="M 14 11 V 17"/></svg>`,
+  pencil: `<svg ${SVG_ATTRS}><path d="M 4 20 L 8 20 L 18 10 L 14 6 L 4 16 Z"/><path d="M 13 7 L 17 11"/></svg>`,
+  arrowRight: `<svg ${SVG_ATTRS}><path d="M 4 12 H 20"/><path d="M 14 6 L 20 12 L 14 18"/></svg>`,
+  folderMove: `<svg ${SVG_ATTRS}><path d="M 3 7 V 19 H 17 V 9 H 9 L 7 7 H 3 Z"/><path d="M 19 13 H 22"/><path d="M 20 11 L 22 13 L 20 15"/></svg>`,
+  plus: `<svg ${SVG_ATTRS}><path d="M 12 5 V 19"/><path d="M 5 12 H 19"/></svg>`,
+  fileText: `<svg ${SVG_ATTRS}><path d="M 6 3 H 14 L 19 8 V 21 H 6 Z"/><path d="M 14 3 V 8 H 19"/><path d="M 9 12 H 16"/><path d="M 9 15 H 16"/><path d="M 9 18 H 13"/></svg>`,
+  folder: `<svg ${SVG_ATTRS}><path d="M 3 7 V 19 H 21 V 9 H 11 L 9 7 H 3 Z"/></svg>`,
+  chevronRight: `<svg ${SVG_ATTRS}><path d="M 9 6 L 15 12 L 9 18"/></svg>`,
+  chevronDown: `<svg ${SVG_ATTRS}><path d="M 6 9 L 12 15 L 18 9"/></svg>`,
 };
 
 let _activeMenuTrigger: HTMLElement | null = null;
@@ -1958,19 +2638,42 @@ function openNewPageModal(defaultType: 'page' | 'folder' | 'image' = 'page', ctx
   $('new-page-ai-section').style.display = 'none';
   $('new-page-image-section').style.display = defaultType === 'image' ? '' : 'none';
   populateParentSelect(defaultType);
+  // Reset template selection and refresh the list (lazy-load on every open
+  // so newly-saved templates appear immediately).
+  ($('new-page-template') as HTMLSelectElement).value = '';
+  populateNewPageTemplateSelect();
+  void loadTemplates();
   ($('new-page-name') as HTMLInputElement).focus();
 }
 
 function populateParentSelect(type: string): void {
   const select = $('new-page-parent') as HTMLSelectElement;
   const folders = state.pages.filter(p => p.type === 'folder');
-  select.innerHTML = '<option value="">— Root level —</option>';
+
+  // Build a child map for depth-first traversal
+  const childMap = new Map<string, typeof folders>();
   folders.forEach(f => {
-    const opt = document.createElement('option');
-    opt.value = f.id;
-    opt.textContent = f.display_name || f.name;
-    select.appendChild(opt);
+    const key = f.parent_id || '';
+    if (!childMap.has(key)) childMap.set(key, []);
+    childMap.get(key)!.push(f);
   });
+
+  select.innerHTML = '<option value="">— Root level —</option>';
+
+  function addOptions(parentId: string, depth: number): void {
+    const children = childMap.get(parentId) || [];
+    children.forEach(f => {
+      const opt = document.createElement('option');
+      opt.value = f.id;
+      const indent = depth === 0 ? '' : '  '.repeat(depth) + '└ ';
+      opt.textContent = indent + (f.display_name || f.name);
+      select.appendChild(opt);
+      addOptions(f.id, depth + 1);
+    });
+  }
+
+  addOptions('', 0);
+
   if (type === 'page') {
     // Priority: explicit ctx folder → current folder → parent of current page → root
     const ctxId = _ctxFolderId
@@ -1993,6 +2696,11 @@ function updateTypeOptions(type: string): void {
   $('new-page-parent-row').style.display = (isFolder || isImage) ? 'none' : '';
   $('new-page-ai-section').style.display = 'none';
   $('new-page-image-section').style.display = isImage ? '' : 'none';
+
+  // Templates only apply to .md pages (markdown templates).
+  const fileType = ($('new-page-file-type') as HTMLSelectElement).value;
+  const showTemplate = !isFolder && !isImage && fileType === 'md';
+  $('new-page-template-row').style.display = showTemplate ? '' : 'none';
 
   // Pre-fill with AI: never shown for folders, only shown for pages when AI enabled
   const showPrefill = !isFolder && !isImage && state.aiEnabled;
@@ -2099,7 +2807,14 @@ async function submitNewPage(): Promise<void> {
   try {
     let content = '';
 
-    if (type === 'page' && aiPrompt) {
+    // Template (markdown only) takes precedence over the AI prompt.
+    const templateId = type === 'page' && fileType === 'md'
+      ? ($('new-page-template') as HTMLSelectElement).value
+      : '';
+    if (templateId) {
+      const tpl = templatesList.find(t => t.id === templateId);
+      if (tpl) content = tpl.content;
+    } else if (type === 'page' && aiPrompt) {
       showMascotLoading('Generating content…', 'Yoyo is writing your page');
       try {
         const { content: gen } = await api.generate({ prompt: aiPrompt, type: fileType as 'md' | 'html' });
@@ -2165,8 +2880,8 @@ function showWelcome(): void {
         All pages are stored as <strong>.md</strong> and <strong>.html</strong> files in <code style="font-family:'JetBrains Mono',monospace;font-size:13px;background:var(--butter);padding:2px 6px;border-radius:4px;">data/pages/</code>
       </p>
       <div style="display:flex;gap:10px;margin-top:8px;">
-        <button class="btn btn-primary" onclick="openNewPageModal('folder')">📁 New Folder</button>
-        <button class="btn btn-ghost" onclick="openNewPageModal('page')">📝 New Page</button>
+        <button class="btn btn-primary" onclick="openNewPageModal('folder')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;display:inline-block;vertical-align:-2px;margin-right:5px"><path d="M 3 7 V 19 H 21 V 9 H 11 L 9 7 H 3 Z"/></svg>New Folder</button>
+        <button class="btn btn-ghost" onclick="openNewPageModal('page')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;display:inline-block;vertical-align:-2px;margin-right:5px"><path d="M 5 3 H 13 L 18 8 V 21 H 5 Z"/><path d="M 13 3 V 8 H 18"/><path d="M 11.5 16 H 14.5"/><path d="M 13 14.5 V 17.5"/></svg>New Page</button>
       </div>
     </div>
   `;
@@ -2605,7 +3320,46 @@ function toggleChat(): void {
   if (!state.aiEnabled) return; // no AI configured — ignore
   state.chatOpen = !state.chatOpen;
   $('chat-drawer').classList.toggle('open', state.chatOpen);
-  if (state.chatOpen && state.currentPageId) loadChatHistory();
+  if (state.chatOpen) {
+    void populateChatProfilePicker();
+    if (state.currentPageId) loadChatHistory();
+  }
+}
+
+// Populate the profile <select> in the chat drawer with the available LLM
+// profiles, marking the currently active one as selected. Hides the row
+// entirely when only zero or one profile exists (nothing to switch between).
+async function populateChatProfilePicker(): Promise<void> {
+  try {
+    const { profiles, activeId } = await api.getProfiles();
+    const row = $('chat-profile-row');
+    const select = $('chat-profile-select') as HTMLSelectElement;
+    if (!row || !select) return;
+    if (profiles.length < 2) {
+      row.style.display = 'none';
+      return;
+    }
+    row.style.display = '';
+    select.innerHTML = profiles.map(p => {
+      const label = `${p.name} — ${p.provider}${p.model ? ' · ' + p.model : ''}`;
+      const sel = p.id === activeId ? ' selected' : '';
+      return `<option value="${esc(p.id)}"${sel}>${esc(label)}</option>`;
+    }).join('');
+  } catch { /* silently ignore — picker just stays hidden */ }
+}
+
+async function changeChatProfile(id: string): Promise<void> {
+  if (!id) return;
+  try {
+    await api.setActiveProfile(id);
+    // Pre-cached lists used elsewhere in the UI need to know about the change.
+    activeProfileId = id;
+    showToast('Switched AI profile');
+  } catch (err) {
+    showToast('Switch failed: ' + (err as Error).message, 'error');
+    // Revert the select to whatever the server still considers active.
+    void populateChatProfilePicker();
+  }
 }
 
 function toggleSidebar(): void {
@@ -2816,8 +3570,195 @@ async function openSettings(): Promise<void> {
 
 function closeSettings(): void {
   $('settings-overlay').classList.remove('open');
+  // If the template editor was open, tear it down so we don't leak a
+  // ProseMirror view across modal opens.
+  setTemplateEditorOpen(false);
   // Re-evaluate AI availability in case the user just added/removed a profile
   void applyAIVisibility();
+}
+
+// ── Settings tabs (AI Profiles | Templates) ──────────────────────────────────
+function openSettingsTab(tab: 'ai' | 'templates'): void {
+  $('settings-tab-ai').style.display = tab === 'ai' ? '' : 'none';
+  $('settings-tab-templates').style.display = tab === 'templates' ? '' : 'none';
+  $('stab-ai').classList.toggle('active', tab === 'ai');
+  $('stab-templates').classList.toggle('active', tab === 'templates');
+  if (tab === 'templates') void loadTemplates();
+}
+
+// ── MD Templates ────────────────────────────────────────────────────────────
+let templatesList: MdTemplate[] = [];
+let editingTemplateId: string | null = null;
+
+async function loadTemplates(): Promise<void> {
+  try {
+    const { templates } = await api.getTemplates();
+    templatesList = templates || [];
+    renderTemplatesList();
+    populateNewPageTemplateSelect();
+  } catch {
+    showToast('Failed to load templates', 'error');
+  }
+}
+
+function renderTemplatesList(): void {
+  const list = $('templates-list');
+  if (!templatesList.length) {
+    list.innerHTML = `
+      <div class="settings-empty" style="padding:24px 0;">
+        <p>No templates yet. Click <strong>+ New Template</strong> to create one.</p>
+      </div>
+    `;
+    return;
+  }
+  list.innerHTML = templatesList.map(t => {
+    const firstLine = (t.content || '').split('\n').find(l => l.trim()) || '';
+    return `
+      <div class="template-item" onclick="editTemplate('${t.id}')">
+        <span class="template-item-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><path d="M 6 3 H 14 L 19 8 V 21 H 6 Z"/><path d="M 14 3 V 8 H 19"/><path d="M 9 12 H 16"/><path d="M 9 15 H 16"/><path d="M 9 18 H 13"/></svg></span>
+        <div class="template-item-info">
+          <div class="template-item-name">${esc(t.name)}</div>
+          <div class="template-item-preview">${esc(firstLine.slice(0, 80))}</div>
+        </div>
+        <div class="template-item-actions" onclick="event.stopPropagation()">
+          <button class="btn btn-ghost btn-sm" onclick="editTemplate('${t.id}')">Edit</button>
+          <button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="deleteTemplateById('${t.id}')">Delete</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+// TipTap editor mounted inside the template form (replaces the old textarea
+// so users get the same WYSIWYG experience as the page editor: markdown
+// shortcuts, lists, tasks, headings, links, etc).
+interface MiniEditor { destroy: () => void; getJSON: () => TipTapDoc }
+let templateContentEditor: MiniEditor | null = null;
+
+function mountTemplateContentEditor(initialMarkdown: string): void {
+  destroyTemplateContentEditor();
+  if (!window.TipTapBundle) return;
+  const { Editor, StarterKit, TaskList, TaskItem, Underline, Link, ListKeymap, Placeholder } = window.TipTapBundle;
+  const initialHtml = initialMarkdown ? renderMarkdown(initialMarkdown) : '';
+  type EditorCtor = new (opts: Record<string, unknown>) => MiniEditor;
+  templateContentEditor = new (Editor as unknown as EditorCtor)({
+    element: $('template-content-editor'),
+    extensions: [
+      (StarterKit as { configure: (opts: Record<string, unknown>) => unknown }).configure({
+        heading: { levels: [1, 2, 3, 4, 5, 6] },
+      }),
+      TaskList,
+      (TaskItem as { configure: (opts: Record<string, unknown>) => unknown }).configure({ nested: true }),
+      Underline,
+      (Link as { configure: (opts: Record<string, unknown>) => unknown }).configure({
+        openOnClick: false,
+        validate: () => true,
+        HTMLAttributes: { rel: 'noopener noreferrer' },
+      }),
+      ListKeymap,
+      (Placeholder as { configure: (opts: Record<string, unknown>) => unknown }).configure({
+        placeholder: 'Write your template here… # heading, - list, [] task, ** bold',
+      }),
+    ],
+    content: initialHtml,
+    editorProps: {
+      attributes: { class: 'tiptap-content', spellcheck: 'true' },
+    },
+  });
+}
+
+function destroyTemplateContentEditor(): void {
+  if (templateContentEditor) {
+    try { templateContentEditor.destroy(); } catch { /* already destroyed */ }
+    templateContentEditor = null;
+  }
+}
+
+function getTemplateContentMarkdown(): string {
+  if (!templateContentEditor) return '';
+  return tiptapToMarkdown(templateContentEditor.getJSON()).replace(/\n+$/, '');
+}
+
+function setTemplateEditorOpen(open: boolean): void {
+  $('template-editor').style.display = open ? '' : 'none';
+  // Hide the list (and its empty state) while editing — they share visual space
+  // and the empty-state copy is misleading when the editor is in fact open.
+  $('templates-list').style.display = open ? 'none' : '';
+  // Hide the "+ New Template" button while editing so the user finishes/cancels
+  // first instead of stacking another empty editor.
+  const headerBtn = document.querySelector<HTMLButtonElement>(
+    '.templates-list-header button',
+  );
+  if (headerBtn) headerBtn.style.display = open ? 'none' : '';
+  if (!open) destroyTemplateContentEditor();
+}
+
+function openNewTemplateForm(): void {
+  editingTemplateId = null;
+  ($('template-name') as HTMLInputElement).value = '';
+  setTemplateEditorOpen(true);
+  mountTemplateContentEditor('');
+  setTimeout(() => ($('template-name') as HTMLInputElement).focus(), 50);
+}
+
+function editTemplate(id: string): void {
+  const t = templatesList.find(x => x.id === id);
+  if (!t) return;
+  editingTemplateId = id;
+  ($('template-name') as HTMLInputElement).value = t.name;
+  setTemplateEditorOpen(true);
+  mountTemplateContentEditor(t.content || '');
+  setTimeout(() => ($('template-name') as HTMLInputElement).focus(), 50);
+}
+
+function cancelTemplateEdit(): void {
+  setTemplateEditorOpen(false);
+  editingTemplateId = null;
+}
+
+async function saveCurrentTemplate(): Promise<void> {
+  const name = ($('template-name') as HTMLInputElement).value.trim();
+  const content = getTemplateContentMarkdown();
+  if (!name) { showToast('Template name is required', 'error'); return; }
+  const id = editingTemplateId || (crypto.randomUUID ? crypto.randomUUID() : `t-${Date.now()}`);
+  try {
+    await api.saveTemplate({ id, name, content });
+    showToast('Template saved');
+    cancelTemplateEdit();
+    await loadTemplates();
+  } catch (err) {
+    showToast('Save failed: ' + (err as Error).message, 'error');
+  }
+}
+
+async function deleteTemplateById(id: string): Promise<void> {
+  const t = templatesList.find(x => x.id === id);
+  if (!t) return;
+  const confirmed = await showConfirmDelete(t.name, 'Delete template?');
+  if (!confirmed) return;
+  try {
+    await api.deleteTemplate(id);
+    showToast('Template deleted');
+    if (editingTemplateId === id) cancelTemplateEdit();
+    await loadTemplates();
+  } catch (err) {
+    showToast('Delete failed: ' + (err as Error).message, 'error');
+  }
+}
+
+function populateNewPageTemplateSelect(): void {
+  const select = $('new-page-template') as HTMLSelectElement | null;
+  if (!select) return;
+  const previous = select.value;
+  select.innerHTML = '<option value="">— Blank page —</option>';
+  for (const t of templatesList) {
+    const opt = document.createElement('option');
+    opt.value = t.id;
+    opt.textContent = t.name;
+    select.appendChild(opt);
+  }
+  // Preserve selection if still valid
+  if (previous && templatesList.some(t => t.id === previous)) select.value = previous;
 }
 
 function renderProfilesList(): void {
@@ -2856,12 +3797,13 @@ function selectProfileItem(id: string): void {
 
   // Update active button state
   const activeBtn = $('set-active-btn') as HTMLButtonElement;
+  const starSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;display:inline-block;vertical-align:-2px;margin-right:3px"><path d="M 12 3 L 14.5 9 L 21 10 L 16 14.5 L 17.5 21 L 12 17.5 L 6.5 21 L 8 14.5 L 3 10 L 9.5 9 Z"/></svg>';
   if (id === activeProfileId) {
-    activeBtn.textContent = '★ Active';
+    activeBtn.innerHTML = `${starSvg}Active`;
     activeBtn.disabled = true;
     activeBtn.className = 'btn btn-danger btn-sm';
   } else {
-    activeBtn.textContent = '★ Set Active';
+    activeBtn.innerHTML = `${starSvg}Set Active`;
     activeBtn.disabled = false;
     activeBtn.className = 'btn btn-primary btn-sm';
   }
@@ -3014,12 +3956,138 @@ function showToast(msg: string, type: 'info' | 'error' = 'info'): void {
   toastTimer = setTimeout(() => toast.classList.remove('show'), 3500);
 }
 
-// ── Search ────────────────────────────────────────────────────────────────────
+// ── Sidebar search ────────────────────────────────────────────────────────────
 let searchTimer: ReturnType<typeof setTimeout> | undefined;
 
 function onSearch(): void {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(() => renderSidebar(), 200);
+}
+
+// ── Find in page ──────────────────────────────────────────────────────────────
+
+let _findMatches: HTMLElement[] = [];
+let _findIndex = -1;
+const FIND_MARK_CLASS = 'find-highlight';
+const FIND_MARK_ACTIVE_CLASS = 'find-highlight-active';
+
+// Skips elements that are not readable content (code editor chrome, UI widgets)
+const FIND_SKIP_SELECTORS = [
+  '.tab-bar', '.topbar', '.find-bar', '.sidebar', '.chat-drawer',
+  '.editor-toolbar', '.asset-menu-btn', '.child-card-menu-btn',
+  'button', 'input', 'select', 'textarea',
+];
+
+function openFindBar(): void {
+  const bar = $('find-bar');
+  bar.style.display = '';
+  const input = $('find-input') as HTMLInputElement;
+  input.value = '';
+  input.focus();
+  input.select();
+  $('find-count').textContent = '';
+  clearFindHighlights();
+}
+
+function closeFindBar(): void {
+  $('find-bar').style.display = 'none';
+  clearFindHighlights();
+  _findMatches = [];
+  _findIndex = -1;
+}
+
+function clearFindHighlights(): void {
+  const marks = document.querySelectorAll<HTMLElement>(`.${FIND_MARK_CLASS}`);
+  marks.forEach(m => {
+    const parent = m.parentNode;
+    if (!parent) return;
+    parent.replaceChild(document.createTextNode(m.textContent ?? ''), m);
+    parent.normalize();
+  });
+  _findMatches = [];
+  _findIndex = -1;
+}
+
+function runFind(query: string): void {
+  clearFindHighlights();
+  if (!query) { $('find-count').textContent = ''; return; }
+
+  const root = $('content-area');
+  const lq = query.toLowerCase();
+
+  // Walk all text nodes inside content-area, skip UI elements
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const el = node.parentElement;
+      if (!el) return NodeFilter.FILTER_REJECT;
+      for (const sel of FIND_SKIP_SELECTORS) {
+        if (el.closest(sel)) return NodeFilter.FILTER_REJECT;
+      }
+      return node.textContent?.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+    },
+  });
+
+  const matches: HTMLElement[] = [];
+  let textNode: Text | null;
+  while ((textNode = walker.nextNode() as Text | null)) {
+    const text = textNode.textContent ?? '';
+    const ltext = text.toLowerCase();
+    let pos = 0;
+    let idx: number;
+    const frags: (string | HTMLElement)[] = [];
+    while ((idx = ltext.indexOf(lq, pos)) !== -1) {
+      if (idx > pos) frags.push(text.slice(pos, idx));
+      const mark = document.createElement('mark');
+      mark.className = FIND_MARK_CLASS;
+      mark.textContent = text.slice(idx, idx + query.length);
+      frags.push(mark);
+      matches.push(mark);
+      pos = idx + query.length;
+    }
+    if (!frags.length) continue;
+    if (pos < text.length) frags.push(text.slice(pos));
+    const parent = textNode.parentNode!;
+    const anchor = document.createDocumentFragment();
+    frags.forEach(f => anchor.appendChild(typeof f === 'string' ? document.createTextNode(f) : f));
+    parent.replaceChild(anchor, textNode);
+  }
+
+  _findMatches = matches;
+  _findIndex = matches.length ? 0 : -1;
+  activateFindMatch(_findIndex);
+  updateFindCount();
+}
+
+function activateFindMatch(idx: number): void {
+  _findMatches.forEach((m, i) => m.classList.toggle(FIND_MARK_ACTIVE_CLASS, i === idx));
+  if (idx >= 0 && _findMatches[idx]) {
+    _findMatches[idx].scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+}
+
+function updateFindCount(): void {
+  const count = $('find-count');
+  if (!_findMatches.length) {
+    count.textContent = 'No results';
+    count.style.color = 'var(--tomato)';
+  } else {
+    count.textContent = `${_findIndex + 1} / ${_findMatches.length}`;
+    count.style.color = '';
+  }
+}
+
+function findNext(): void {
+  if (!_findMatches.length) return;
+  _findIndex = (_findIndex + 1) % _findMatches.length;
+  activateFindMatch(_findIndex);
+  updateFindCount();
+}
+
+function findPrev(): void {
+  if (!_findMatches.length) return;
+  _findIndex = (_findIndex - 1 + _findMatches.length) % _findMatches.length;
+  activateFindMatch(_findIndex);
+  updateFindCount();
 }
 
 // ── Markdown render helper ────────────────────────────────────────────────────
@@ -3106,6 +4174,13 @@ function setupEventListeners(): void {
   $('sidebar-search').addEventListener('input', onSearch);
   $('btn-new-page').addEventListener('click', () => openNewPageModal('page'));
   $('btn-new-folder').addEventListener('click', () => openNewPageModal('folder'));
+
+  // When the file-type changes, the template dropdown's relevance changes
+  // (templates are markdown). Re-evaluate visibility via the existing helper.
+  $('new-page-file-type').addEventListener('change', () => {
+    const t = ($('new-page-type') as HTMLSelectElement).value;
+    updateTypeOptions(t);
+  });
   $('settings-btn').addEventListener('click', openSettings);
   $('chat-toggle').addEventListener('click', toggleChat);
   $('chat-close-btn').addEventListener('click', toggleChat);
@@ -3133,7 +4208,28 @@ function setupEventListeners(): void {
   window.addEventListener('resize', closeCardMenu);
   document.addEventListener('keydown', (e: KeyboardEvent) => {
     if (e.key === 'Escape' && _activeMenuTrigger) closeCardMenu();
+    if (e.key === 'Escape' && $('find-bar').style.display !== 'none') closeFindBar();
+    if (e.key === 'f' && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
+      // Only intercept Ctrl/Cmd+F when focus is in the main area (not a modal / input)
+      const active = document.activeElement;
+      const inModal = active?.closest('.modal, .overlay, .chat-drawer, .sidebar');
+      if (!inModal) { e.preventDefault(); openFindBar(); }
+    }
   });
+
+  // Find bar interactions
+  let _findTimer: ReturnType<typeof setTimeout> | undefined;
+  ($('find-input') as HTMLInputElement).addEventListener('input', function () {
+    clearTimeout(_findTimer);
+    _findTimer = setTimeout(() => runFind(this.value), 150);
+  });
+  ($('find-input') as HTMLInputElement).addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.key === 'Enter') { e.shiftKey ? findPrev() : findNext(); }
+    if (e.key === 'Escape') closeFindBar();
+  });
+  $('find-prev').addEventListener('click', findPrev);
+  $('find-next').addEventListener('click', findNext);
+  $('find-close').addEventListener('click', closeFindBar);
 
   $('confirm-delete-cancel').addEventListener('click', () => closeConfirmDelete(false));
   $('confirm-delete-ok').addEventListener('click', () => closeConfirmDelete(true));

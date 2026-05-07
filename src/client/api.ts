@@ -93,6 +93,18 @@ export const api = {
   createProject: (name: string) => request<{ project: Project }>('POST', '/projects', { name }),
   renameProject: (id: string, name: string) => request<{ project: Project }>('PATCH', `/projects/${id}`, { name }),
   deleteProject: (id: string) => request<SuccessResponse>('DELETE', `/projects/${id}`),
+  reorderProjects: (ids: string[]) =>
+    request<ProjectsResponse>('PUT', '/projects/order', { ids }),
+  uploadProjectLogo: (id: string, file: File) => {
+    const fd = new FormData();
+    fd.append('logo', file);
+    return request<{ project: Project }>('POST', `/projects/${id}/logo`, fd, true);
+  },
+  deleteProjectLogo: (id: string) =>
+    request<{ project: Project }>('DELETE', `/projects/${id}/logo`),
+  // Cache-busted URL: ?v=<filename> changes whenever the logo is replaced.
+  projectLogoUrl: (id: string, version?: string) =>
+    `${API_BASE}/projects/${id}/logo${version ? `?v=${encodeURIComponent(version)}` : ''}`,
 
   // ── Pages ──────────────────────────────────────────────────────────────────
   getTree: () => request<PagesResponse>('GET', '/pages'),
@@ -106,6 +118,8 @@ export const api = {
   uploadFiles: (formData: FormData) => request<AssetsResponse>('POST', '/assets/upload', formData, true),
   getAssets: (pageId?: string) => request<AssetsResponse>('GET', `/assets${pageId ? `?page_id=${pageId}` : ''}`),
   deleteAsset: (id: string) => request<SuccessResponse>('DELETE', `/assets/${id}`),
+  updateAssetContent: (id: string, content: string) =>
+    request<SuccessResponse>('PUT', `/assets/${id}/content`, { content }),
   assetUrl: (id: string) => `${API_BASE}/assets/${id}/file`,
 
   // ── Settings ───────────────────────────────────────────────────────────────

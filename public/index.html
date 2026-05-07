@@ -35,10 +35,13 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
-
   <!-- TipTap WYSIWYG bundle (built locally, no CDN dependency) -->
   <script src="/js/tiptap.bundle.js"></script>
+
+  <!-- Monaco editor loader — used by the HTML edit mode. Loaded as AMD via
+       Monaco's own loader.js shim; the actual editor module is fetched
+       lazily on first use, not on page load. -->
+  <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/loader.js"></script>
 
   <link rel="stylesheet" href="/css/app.css">
 </head>
@@ -58,28 +61,22 @@
         <div class="project-switcher" id="project-switcher"></div>
         <button class="sidebar-collapse-btn" id="sidebar-collapse-btn" onclick="toggleSidebar()"
           title="Collapse sidebar">
-          <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
-            <path fill-rule="evenodd"
-              d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z"
-              clip-rule="evenodd" />
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14">
+            <path d="M 15 6 L 9 12 L 15 18"/>
           </svg>
         </button>
       </div>
 
       <div class="sidebar-search">
         <div class="search-input-wrap">
-          <svg viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd"
-              d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z"
-              clip-rule="evenodd" />
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="6"/><path d="M 15.5 15.5 L 20 20"/>
           </svg>
           <input type="text" id="sidebar-search" placeholder="Search pages..." autocomplete="off">
         </div>
         <button class="icon-btn" id="settings-btn" title="Settings" onclick="openSettings()">
-          <svg viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd"
-              d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z"
-              clip-rule="evenodd" />
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M 19.7 9.9 L 19.7 14.1 L 17.3 13.4 L 15.9 15.9 L 17.7 17.7 L 14.1 19.7 L 13.4 17.3 L 10.6 17.3 L 9.9 19.7 L 6.3 17.7 L 8.1 15.9 L 6.7 13.4 L 4.3 14.1 L 4.3 9.9 L 6.7 10.6 L 8.1 8.1 L 6.3 6.3 L 9.9 4.3 L 10.6 6.7 L 13.4 6.7 L 14.1 4.3 L 17.7 6.3 L 15.9 8.1 L 17.3 10.6 Z"/><circle cx="12" cy="12" r="3"/>
           </svg>
         </button>
       </div>
@@ -88,16 +85,14 @@
 
       <div class="sidebar-footer">
         <button class="btn-add primary" id="btn-new-page">
-          <svg viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd"
-              d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V7.414A2 2 0 0015.414 6L12 2.586A2 2 0 0010.586 2H6zm5 6a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V8z"
-              clip-rule="evenodd" />
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M 5 3 H 13 L 18 8 V 21 H 5 Z"/><path d="M 13 3 V 8 H 18"/><path d="M 11.5 16 H 14.5"/><path d="M 13 14.5 V 17.5"/>
           </svg>
           New Page
         </button>
         <button class="btn-add" id="btn-new-folder">
-          <svg viewBox="0 0 20 20" fill="currentColor">
-            <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M 3 7 V 19 H 21 V 9 H 11 L 9 7 H 3 Z"/>
           </svg>
           Folder
         </button>
@@ -108,10 +103,8 @@
           <span class="sidebar-user-tenant" id="sidebar-user-tenant"></span>
         </div>
         <button class="btn-cloud-logout" id="btn-logout" onclick="cloudLogout()" title="Sign out">
-          <svg viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd"
-              d="M3 3a1 1 0 00-1 1v12a1 1 0 102 0V4a1 1 0 00-1-1zm10.293 9.293a1 1 0 001.414 1.414l3-3a1 1 0 000-1.414l-3-3a1 1 0 10-1.414 1.414L14.586 9H7a1 1 0 100 2h7.586l-1.293 1.293z"
-              clip-rule="evenodd" />
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M 4 12 H 20"/><path d="M 14 6 L 20 12 L 14 18"/>
           </svg>
         </button>
       </div>
@@ -131,33 +124,53 @@
         </div>
         <div class="topbar-actions">
           <span class="save-indicator hidden" id="save-indicator">
-            <svg viewBox="0 0 20 20" fill="currentColor" style="width:13px;height:13px">
-              <path fill-rule="evenodd"
-                d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                clip-rule="evenodd" />
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px">
+              <path d="M 5 12 L 10 17 L 19 7"/>
             </svg>
             Saved
           </span>
           <span class="saving-indicator hidden" id="saving-indicator">
-            <svg viewBox="0 0 20 20" fill="currentColor"
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
               style="width:13px;height:13px;animation:spin 1s linear infinite">
-              <path fill-rule="evenodd"
-                d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z"
-                clip-rule="evenodd" />
+              <path d="M 4 11 a 8 8 0 0 1 14 -4"/><path d="M 14 7 H 18 V 3"/><path d="M 20 13 a 8 8 0 0 1 -14 4"/><path d="M 10 17 H 6 V 21"/>
             </svg>
             Saving…
           </span>
           <button class="btn btn-sm btn-ghost hidden" id="html-edit-btn" title="Toggle HTML editor"
             onclick="toggleHtmlEditMode()">
-            ✏️ Edit HTML
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;display:inline-block;vertical-align:-2px;margin-right:4px"><path d="M 4 20 L 8 20 L 18 10 L 14 6 L 4 16 Z"/><path d="M 13 7 L 17 11"/></svg>Edit HTML
           </button>
           <span class="topbar-badge" id="topbar-badge"></span>
         </div>
       </div>
 
+      <!-- Tab bar -->
+      <div class="tab-bar" id="tab-bar" style="display:none"></div>
+
       <!-- Content -->
       <div class="content-area" id="content-area">
         <!-- Rendered by app.js -->
+      </div>
+
+      <!-- Find-in-page bar (Ctrl/Cmd+F) -->
+      <div class="find-bar" id="find-bar" style="display:none">
+        <input type="text" id="find-input" class="find-input" placeholder="Find in page…" autocomplete="off" spellcheck="false">
+        <span class="find-count" id="find-count"></span>
+        <button class="find-nav-btn" id="find-prev" title="Previous (Shift+Enter)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13">
+            <path d="M 6 15 L 12 9 L 18 15"/>
+          </svg>
+        </button>
+        <button class="find-nav-btn" id="find-next" title="Next (Enter)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13">
+            <path d="M 6 9 L 12 15 L 18 9"/>
+          </svg>
+        </button>
+        <button class="find-close-btn" id="find-close" title="Close (Esc)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13">
+            <path d="M 6 6 L 18 18"/><path d="M 6 18 L 18 6"/>
+          </svg>
+        </button>
       </div>
 
     </main>
@@ -165,15 +178,13 @@
     <!-- ══ AI CHAT DRAWER ════════════════════════════════════════════════════ -->
     <aside class="chat-drawer" id="chat-drawer">
       <div class="chat-header">
-        <div>
+        <div class="chat-header-titles">
           <div class="chat-header-title">AI Assistant</div>
           <div class="chat-header-sub">Ask anything about this page</div>
         </div>
         <button class="icon-btn" id="chat-close-btn" title="Close">
-          <svg viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd"
-              d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-              clip-rule="evenodd" />
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M 6 6 L 18 18"/><path d="M 6 18 L 18 6"/>
           </svg>
         </button>
       </div>
@@ -186,17 +197,22 @@
       </div>
 
       <div class="chat-footer">
-        <button class="chat-action-btn" onclick="clearChat()">🗑 Clear</button>
-        <button class="chat-action-btn" onclick="applyAiSuggestion()">✨ Apply to Page</button>
+        <button class="chat-action-btn" onclick="clearChat()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;display:inline-block;vertical-align:-2px;margin-right:4px"><path d="M 4 7 H 20"/><path d="M 9 4 H 15 V 7"/><path d="M 6 7 V 19 a 2 2 0 0 0 2 2 H 16 a 2 2 0 0 0 2 -2 V 7"/></svg>Clear</button>
+        <button class="chat-action-btn" onclick="applyAiSuggestion()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;display:inline-block;vertical-align:-2px;margin-right:4px"><path fill="currentColor" stroke="none" d="M 12 2 Q 13.5 10.5 22 12 Q 13.5 13.5 12 22 Q 10.5 13.5 2 12 Q 10.5 10.5 12 2 Z"/></svg>Apply to Page</button>
+      </div>
+
+      <div class="chat-profile-row" id="chat-profile-row" style="display:none">
+        <label for="chat-profile-select" class="chat-profile-label">Model</label>
+        <select id="chat-profile-select" class="chat-profile-select"
+          onchange="changeChatProfile(this.value)"></select>
       </div>
 
       <div class="chat-input-area">
         <div class="chat-input-wrap">
           <textarea id="chat-input" rows="1" placeholder="Ask AI anything… (Enter to send)"></textarea>
           <button class="chat-send-btn" id="chat-send-btn" onclick="sendChatMessage()" title="Send">
-            <svg viewBox="0 0 20 20" fill="currentColor">
-              <path
-                d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M 21 3 L 3 11 L 11 13 L 13 21 L 21 3 Z"/><path d="M 11 13 L 21 3"/>
             </svg>
           </button>
         </div>
@@ -204,6 +220,22 @@
     </aside>
 
   </div><!-- #app -->
+
+  <!-- ══ Code file editor overlay ════════════════════════════════════════════ -->
+  <div class="code-editor-overlay" id="code-editor-overlay" style="display:none">
+    <div class="code-editor-topbar">
+      <span class="code-editor-filename" id="code-editor-filename"></span>
+      <div class="code-editor-actions">
+        <button class="chat-action-btn" id="code-editor-save-btn" onclick="saveCodeFile()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;display:inline-block;vertical-align:-2px;margin-right:4px"><path d="M 12 4 V 16"/><path d="M 7 12 L 12 17 L 17 12"/><path d="M 4 20 H 20"/></svg>Save</button>
+        <button class="icon-btn" onclick="closeCodeFileEditor()" title="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M 6 6 L 18 18"/><path d="M 6 18 L 18 6"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+    <div class="code-editor-body" id="code-editor-host"></div>
+  </div>
 
   <!-- ══ Floating buttons ═══════════════════════════════════════════════════ -->
   <button class="chat-toggle" id="chat-toggle">
@@ -218,10 +250,8 @@
       <div class="modal-title">
         Create New
         <button class="modal-close" onclick="closeNewPageModal()">
-          <svg viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd"
-              d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-              clip-rule="evenodd" />
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M 6 6 L 18 18"/><path d="M 6 18 L 18 6"/>
           </svg>
         </button>
       </div>
@@ -230,17 +260,17 @@
         <label class="form-label">Type</label>
         <div class="type-selector">
           <div class="type-option selected" data-type="page" onclick="selectType('page')">
-            <div class="type-option-icon">📝</div>
+            <div class="type-option-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 6 3 H 14 L 19 8 V 21 H 6 Z"/><path d="M 14 3 V 8 H 19"/><path d="M 9 12 H 16"/><path d="M 9 15 H 16"/><path d="M 9 18 H 13"/></svg></div>
             <div class="type-option-name">Page</div>
             <div class="type-option-desc">MD or HTML</div>
           </div>
           <div class="type-option" data-type="folder" onclick="selectType('folder')">
-            <div class="type-option-icon">📁</div>
+            <div class="type-option-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 3 7 V 19 H 21 V 9 H 11 L 9 7 H 3 Z"/></svg></div>
             <div class="type-option-name">Folder</div>
             <div class="type-option-desc">Group pages</div>
           </div>
           <div class="type-option" data-type="image" id="type-option-image" onclick="selectType('image')">
-            <div class="type-option-icon">🖼️</div>
+            <div class="type-option-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path fill="currentColor" stroke="none" d="M 16 8 Q 16.7 9.7 18.5 10.2 Q 16.7 10.7 16 12.5 Q 15.3 10.7 13.5 10.2 Q 15.3 9.7 16 8 Z"/><path d="M 4 17 L 9 13 L 13 16 L 17 13"/></svg></div>
             <div class="type-option-name">AI Image</div>
             <div class="type-option-desc">Generate art</div>
           </div>
@@ -263,8 +293,8 @@
       <div class="form-group" id="new-page-file-type-row">
         <label class="form-label" for="new-page-file-type">File Format</label>
         <select class="form-select" id="new-page-file-type">
-          <option value="md">📝 Markdown (.md)</option>
-          <option value="html">🌐 HTML (.html)</option>
+          <option value="md">Markdown (.md)</option>
+          <option value="html">HTML (.html)</option>
         </select>
       </div>
 
@@ -309,10 +339,8 @@
       <div class="modal-actions">
         <button class="btn btn-ghost" onclick="closeNewPageModal()">Cancel</button>
         <button class="btn btn-primary" id="new-page-submit" onclick="submitNewPage()">
-          <svg viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd"
-              d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z"
-              clip-rule="evenodd" />
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M 12 5 V 19"/><path d="M 5 12 H 19"/>
           </svg>
           Create
         </button>
@@ -324,12 +352,10 @@
   <div class="modal-overlay" id="create-project-overlay">
     <div class="modal" style="width:360px">
       <div class="modal-title">
-        ◈ New Project
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;display:inline-block;vertical-align:-4px;margin-right:6px"><path d="M 3 9 V 21 H 21 V 11 H 11 L 9 9 H 3 Z"/><path d="M 3 9 V 5 H 8 L 10 7 H 18 V 11"/></svg>New Project
         <button class="modal-close" onclick="closeCreateProjectModal()">
-          <svg viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd"
-              d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-              clip-rule="evenodd" />
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M 6 6 L 18 18"/><path d="M 6 18 L 18 6"/>
           </svg>
         </button>
       </div>
@@ -348,23 +374,35 @@
   <div class="modal-overlay" id="rename-project-overlay">
     <div class="modal" style="width:360px">
       <div class="modal-title">
-        Rename workspace
+        Edit workspace
         <button class="modal-close" onclick="closeRenameProjectModal()">
-          <svg viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd"
-              d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-              clip-rule="evenodd" />
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M 6 6 L 18 18"/><path d="M 6 18 L 18 6"/>
           </svg>
         </button>
       </div>
       <div class="modal-body">
+        <label class="form-label">Workspace logo</label>
+        <div class="project-logo-row">
+          <span class="project-logo-preview" id="rename-project-logo-preview"></span>
+          <div class="project-logo-actions">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="triggerProjectLogoUpload()">Upload logo</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="rename-project-logo-remove"
+              onclick="removeProjectLogo()" style="display:none;color:var(--danger)">Remove</button>
+            <input type="file" id="rename-project-logo-input" accept="image/*" style="display:none"
+              onchange="handleProjectLogoUpload(event)">
+          </div>
+        </div>
+        <p style="font-size:11px;color:var(--text-dim);margin:6px 0 14px;">PNG, JPG or SVG · max 5 MB · square works
+          best.</p>
+
         <label class="form-label">Workspace name</label>
         <input type="text" id="rename-project-input" class="form-input" placeholder="Enter new name…"
           onkeydown="if(event.key==='Enter')submitRenameProject();if(event.key==='Escape')closeRenameProjectModal();">
       </div>
       <div class="modal-actions">
         <button class="btn btn-ghost" onclick="closeRenameProjectModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="submitRenameProject()">Rename</button>
+        <button class="btn btn-primary" onclick="submitRenameProject()">Save</button>
       </div>
     </div>
   </div>
@@ -372,7 +410,7 @@
   <!-- Confirm Delete Modal -->
   <div class="modal-overlay" id="confirm-delete-overlay">
     <div class="modal" style="width:380px;text-align:center;">
-      <div style="font-size:32px;margin-bottom:12px;">🗑️</div>
+      <div style="font-size:32px;margin-bottom:12px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:32px;height:32px;color:var(--danger)"><path d="M 4 7 H 20"/><path d="M 9 4 H 15 V 7"/><path d="M 6 7 V 19 a 2 2 0 0 0 2 2 H 16 a 2 2 0 0 0 2 -2 V 7"/><path d="M 10 11 V 17"/><path d="M 14 11 V 17"/></svg></div>
       <div class="modal-title" id="confirm-delete-title" style="justify-content:center;border:none;padding-bottom:0;">
         Delete asset?</div>
       <p id="confirm-delete-msg" style="color:var(--text-muted);font-size:14px;margin:10px 0 24px;">This action cannot
@@ -389,8 +427,8 @@
     <div class="pdf-viewer-bar">
       <span class="pdf-viewer-name" id="pdf-viewer-name"></span>
       <div style="display:flex;gap:8px;">
-        <a class="btn btn-ghost btn-sm" id="pdf-viewer-download">↓ Download</a>
-        <button class="btn btn-ghost btn-sm" onclick="closePdfViewer()">✕ Close</button>
+        <a class="btn btn-ghost btn-sm" id="pdf-viewer-download"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;display:inline-block;vertical-align:-2px;margin-right:4px"><path d="M 12 4 V 16"/><path d="M 7 12 L 12 17 L 17 12"/><path d="M 4 20 H 20"/></svg>Download</a>
+        <button class="btn btn-ghost btn-sm" onclick="closePdfViewer()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;display:inline-block;vertical-align:-2px;margin-right:4px"><path d="M 6 6 L 18 18"/><path d="M 6 18 L 18 6"/></svg>Close</button>
       </div>
     </div>
     <iframe class="pdf-viewer-frame" id="pdf-viewer-frame" src="" title="PDF Viewer"></iframe>
@@ -398,7 +436,8 @@
 
   <!-- ══ CARD CONTEXT MENU (global floating, populated by JS) ═════════════════ -->
   <div id="floating-card-menu" class="floating-card-menu" onclick="event.stopPropagation()"></div>
-  <div id="floating-card-submenu" class="floating-card-menu floating-card-submenu" onclick="event.stopPropagation()"></div>
+  <div id="floating-card-submenu" class="floating-card-menu floating-card-submenu" onclick="event.stopPropagation()">
+  </div>
 
   <!-- ══ MOVE ITEM MODAL ══════════════════════════════════════════════════════ -->
   <div class="modal-overlay" id="move-item-overlay">
@@ -407,15 +446,11 @@
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
           stroke-linecap="round" stroke-linejoin="round"
           style="display:inline-block;vertical-align:-3px;margin-right:6px">
-          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-          <line x1="9" y1="14" x2="15" y2="14" />
-          <polyline points="12 11 15 14 12 17" />
+          <path d="M 3 7 V 19 H 17 V 9 H 9 L 7 7 H 3 Z"/><path d="M 19 13 H 22"/><path d="M 20 11 L 22 13 L 20 15"/>
         </svg>Move to&hellip;
         <button class="modal-close" onclick="closeMoveModal()">
-          <svg viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd"
-              d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-              clip-rule="evenodd" />
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M 6 6 L 18 18"/><path d="M 6 18 L 18 6"/>
           </svg>
         </button>
       </div>
@@ -426,7 +461,10 @@
             <button type="button" class="custom-select-trigger" id="move-target-trigger">
               <span class="custom-select-label placeholder" id="move-target-label">— Pick a folder —</span>
               <span class="custom-select-trigger-chevron" aria-hidden="true">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M 6 9 L 12 15 L 18 9"/>
+                </svg>
               </span>
             </button>
             <div class="custom-select-panel" id="move-target-panel"></div>
@@ -445,12 +483,10 @@
   <div class="modal-overlay" id="settings-overlay">
     <div class="modal settings-modal">
       <div class="modal-title">
-        ⚙️ Settings
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;display:inline-block;vertical-align:-4px;margin-right:6px"><path d="M 19.7 9.9 L 19.7 14.1 L 17.3 13.4 L 15.9 15.9 L 17.7 17.7 L 14.1 19.7 L 13.4 17.3 L 10.6 17.3 L 9.9 19.7 L 6.3 17.7 L 8.1 15.9 L 6.7 13.4 L 4.3 14.1 L 4.3 9.9 L 6.7 10.6 L 8.1 8.1 L 6.3 6.3 L 9.9 4.3 L 10.6 6.7 L 13.4 6.7 L 14.1 4.3 L 17.7 6.3 L 15.9 8.1 L 17.3 10.6 Z"/><circle cx="12" cy="12" r="3"/></svg>Settings
         <button class="modal-close" onclick="closeSettings()">
-          <svg viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd"
-              d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-              clip-rule="evenodd" />
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M 6 6 L 18 18"/><path d="M 6 18 L 18 6"/>
           </svg>
         </button>
       </div>
@@ -475,10 +511,8 @@
             <div class="settings-profiles-header">
               <span class="settings-profiles-title">Profiles</span>
               <button class="btn-icon" id="add-profile-btn" title="Add profile" onclick="addNewProfile()">
-                <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor">
-                  <path fill-rule="evenodd"
-                    d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z"
-                    clip-rule="evenodd" />
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M 12 5 V 19"/><path d="M 5 12 H 19"/>
                 </svg>
               </button>
             </div>
@@ -571,16 +605,13 @@
 
             <div class="modal-actions profile-actions">
               <button class="btn btn-ghost btn-sm" id="delete-profile-btn" onclick="deleteCurrentProfile()">
-                <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
-                  <path fill-rule="evenodd"
-                    d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
-                    clip-rule="evenodd" />
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M 4 7 H 20"/><path d="M 9 4 H 15 V 7"/><path d="M 6 7 V 19 a 2 2 0 0 0 2 2 H 16 a 2 2 0 0 0 2 -2 V 7"/>
                 </svg>
                 Delete
               </button>
               <div style="display:flex;gap:8px;">
-                <button class="btn btn-ghost btn-sm" id="set-active-btn" onclick="setActiveCurrentProfile()">★ Set
-                  Active</button>
+                <button class="btn btn-ghost btn-sm" id="set-active-btn" onclick="setActiveCurrentProfile()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;display:inline-block;vertical-align:-2px;margin-right:3px"><path d="M 12 3 L 14.5 9 L 21 10 L 16 14.5 L 17.5 21 L 12 17.5 L 6.5 21 L 8 14.5 L 3 10 L 9.5 9 Z"/></svg>Set Active</button>
                 <button class="btn btn-primary btn-sm" onclick="saveCurrentProfile()">Save</button>
               </div>
             </div>
@@ -590,44 +621,41 @@
         <div class="settings-empty" id="profile-empty" style="display:none">
           <p>No profiles yet. Click <strong>+</strong> to create one.</p>
         </div>
-      </div><!-- /settings-split -->
-    </div><!-- /settings-tab-ai -->
+      </div><!-- /settings-tab-ai -->
 
-    <!-- ── TAB: Templates ── -->
-    <div id="settings-tab-templates" class="settings-tab-panel" style="display:none">
-      <div class="templates-panel">
-        <div class="templates-list-header">
-          <span class="settings-profiles-title">MD Templates</span>
-          <button class="btn btn-ghost btn-sm" onclick="openNewTemplateForm()">+ New Template</button>
-        </div>
-        <div id="templates-list" class="templates-list">
-          <!-- Populated by JS -->
-        </div>
-        <!-- Template editor (inline) -->
-        <div id="template-editor" class="template-editor" style="display:none">
-          <div class="form-group">
-            <label class="form-label" for="template-name">Template name</label>
-            <input class="form-input" type="text" id="template-name" placeholder="e.g. Meeting Notes">
+      <!-- ── TAB: Templates ── -->
+      <div id="settings-tab-templates" class="settings-tab-panel" style="display:none">
+        <div class="templates-panel">
+          <div class="templates-list-header">
+            <span class="settings-profiles-title">MD Templates</span>
+            <button class="btn btn-ghost btn-sm" onclick="openNewTemplateForm()">+ New Template</button>
           </div>
-          <div class="form-group">
-            <label class="form-label" for="template-content">Markdown content</label>
-            <textarea class="form-textarea" id="template-content" rows="12"
-              placeholder="# {{title}}&#10;&#10;Write your template here…"
-              style="font-family:'IBM Plex Mono',monospace;font-size:13px;min-height:200px"></textarea>
+          <div id="templates-list" class="templates-list">
+            <!-- Populated by JS -->
           </div>
-          <div class="modal-actions" style="padding:0;margin-top:8px">
-            <button class="btn btn-ghost btn-sm" onclick="cancelTemplateEdit()">Cancel</button>
-            <button class="btn btn-primary btn-sm" onclick="saveCurrentTemplate()">Save template</button>
+          <!-- Template editor (inline) -->
+          <div id="template-editor" class="template-editor" style="display:none">
+            <div class="form-group">
+              <label class="form-label" for="template-name">Template name</label>
+              <input class="form-input" type="text" id="template-name" placeholder="e.g. Meeting Notes">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Markdown content</label>
+              <div id="template-content-editor" class="tiptap-host template-content-host" spellcheck="true"></div>
+            </div>
+            <div class="modal-actions" style="padding:0;margin-top:8px">
+              <button class="btn btn-ghost btn-sm" onclick="cancelTemplateEdit()">Cancel</button>
+              <button class="btn btn-primary btn-sm" onclick="saveCurrentTemplate()">Save template</button>
+            </div>
           </div>
         </div>
-      </div>
-    </div><!-- /settings-tab-templates -->
-  </div>
+      </div><!-- /settings-tab-templates -->
+    </div>
   </div>
 
   <!-- ══ LIGHTBOX ════════════════════════════════════════════════════════════ -->
   <div class="lightbox" id="lightbox">
-    <button class="lightbox-close" onclick="closeLightbox()">✕</button>
+    <button class="lightbox-close" onclick="closeLightbox()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px"><path d="M 6 6 L 18 18"/><path d="M 6 18 L 18 6"/></svg></button>
     <img class="lightbox-img" id="lightbox-img" src="" alt="">
     <div class="lightbox-name" id="lightbox-name"></div>
   </div>
@@ -661,10 +689,8 @@
       <div class="modal-title">
         Rename
         <button class="modal-close" onclick="document.getElementById('rename-overlay').classList.remove('open')">
-          <svg viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd"
-              d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-              clip-rule="evenodd" />
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M 6 6 L 18 18"/><path d="M 6 18 L 18 6"/>
           </svg>
         </button>
       </div>
@@ -686,10 +712,8 @@
       <div class="modal-title">
         Delete page?
         <button class="modal-close" onclick="document.getElementById('delete-overlay').classList.remove('open')">
-          <svg viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd"
-              d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-              clip-rule="evenodd" />
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M 6 6 L 18 18"/><path d="M 6 18 L 18 6"/>
           </svg>
         </button>
       </div>
@@ -711,10 +735,8 @@
         Delete AI profile?
         <button class="modal-close"
           onclick="document.getElementById('delete-profile-overlay').classList.remove('open')">
-          <svg viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd"
-              d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-              clip-rule="evenodd" />
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M 6 6 L 18 18"/><path d="M 6 18 L 18 6"/>
           </svg>
         </button>
       </div>

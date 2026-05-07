@@ -2,6 +2,7 @@ export interface Project {
     id: string;
     name: string;
     created_at: string;
+    logo?: string;
 }
 export interface PageNode {
     id: string;

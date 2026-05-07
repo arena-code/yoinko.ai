@@ -4,6 +4,10 @@ export interface Project {
   id: string;        // slug e.g. "default", "my-work"
   name: string;      // display name e.g. "Default", "My Work"
   created_at: string;
+  // Filename of the uploaded logo, relative to the project's data dir.
+  // Includes a timestamp segment (e.g. "logo-1715040000000.png") so the
+  // public URL changes when the logo is replaced — natural cache-busting.
+  logo?: string;
 }
 
 export interface PageNode {

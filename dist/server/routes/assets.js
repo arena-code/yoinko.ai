@@ -21,17 +21,37 @@ const storage = multer.diskStorage({
         cb(null, `${uuidv4()}${ext}`);
     },
 });
+// Allowed file extensions: media + documents + common code/text formats.
+// Anything else → rejected with a friendly error.
+const ALLOWED_EXTS = new Set([
+    // Images & media
+    'jpeg', 'jpg', 'png', 'gif', 'webp', 'svg', 'avif', 'bmp', 'ico',
+    'mp4', 'mov', 'webm', 'mkv', 'mp3', 'wav', 'm4a', 'ogg', 'flac',
+    // Documents
+    'pdf', 'txt', 'md', 'markdown', 'html', 'htm', 'csv', 'json', 'xml', 'yaml', 'yml', 'toml',
+    'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'rtf',
+    'zip', 'tar', 'gz', '7z', 'rar',
+    // Code & config files
+    'js', 'jsx', 'mjs', 'cjs', 'ts', 'tsx',
+    'py', 'rb', 'go', 'rs', 'java', 'kt', 'swift', 'php', 'cs', 'cpp', 'cc', 'c', 'h', 'hpp',
+    'sh', 'bash', 'zsh', 'fish', 'ps1', 'bat',
+    'css', 'scss', 'sass', 'less', 'styl',
+    'sql', 'graphql', 'gql', 'proto',
+    'env', 'ini', 'conf', 'cfg', 'lock',
+    'dockerfile', 'makefile', 'gitignore', 'editorconfig',
+]);
 const upload = multer({
     storage,
     limits: { fileSize: 50 * 1024 * 1024 }, // 50MB max
     fileFilter: (_req, file, cb) => {
-        const allowed = /jpeg|jpg|png|gif|webp|svg|pdf|mp4|mov|mp3|txt|md|html|csv|json/;
-        const ext = allowed.test(path.extname(file.originalname).toLowerCase());
-        const mime = allowed.test(file.mimetype.split('/')[1]?.toLowerCase() ?? '');
-        if (ext || mime)
-            cb(null, true);
-        else
-            cb(new Error('File type not allowed'));
+        const ext = path.extname(file.originalname).toLowerCase().replace(/^\./, '');
+        if (ALLOWED_EXTS.has(ext))
+            return cb(null, true);
+        // Fallback: accept any text/* mime so plain-text files without a
+        // recognised extension still work (e.g. dotfiles, README, LICENSE).
+        if (file.mimetype.startsWith('text/'))
+            return cb(null, true);
+        cb(new Error(`File type not allowed: .${ext || 'unknown'}`));
     },
 });
 // ── POST /api/assets/upload ───────────────────────────────────────────────────
@@ -120,6 +140,30 @@ router.get('/:id/file', async (req, res) => {
     }
     catch (err) {
         res.status(500).send(err.message);
+    }
+});
+// ── PUT /api/assets/:id/content — overwrite file content (code editor save) ──
+router.put('/:id/content', (req, res) => {
+    try {
+        const pid = projectId(req);
+        const dd = dataDir(req);
+        const db = getProjectDb(pid, dd);
+        const { uploadsDir } = getProjectDirs(pid, dd);
+        const asset = db.prepare(`SELECT * FROM assets WHERE id = ?`).get(req.params.id);
+        if (!asset)
+            return void res.status(404).json({ error: 'Asset not found' });
+        const { content } = req.body;
+        if (typeof content !== 'string')
+            return void res.status(400).json({ error: 'content must be a string' });
+        const filePath = path.join(uploadsDir, asset.filename);
+        fs.writeFileSync(filePath, content, 'utf8');
+        // Update size in DB
+        const newSize = Buffer.byteLength(content, 'utf8');
+        db.prepare(`UPDATE assets SET size = ? WHERE id = ?`).run(newSize, req.params.id);
+        res.json({ success: true });
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message });
     }
 });
 // ── PATCH /api/assets/:id — update page_id (move asset to another page) ──────

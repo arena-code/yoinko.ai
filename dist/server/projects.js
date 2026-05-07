@@ -59,6 +59,58 @@ export function renameProject(id, name, dataDir = DATA_DIR) {
     saveProjects(projects, dataDir);
     return projects[idx];
 }
+// ── Reorder ───────────────────────────────────────────────────────────────────
+// Persists the workspaces in the order specified by `ids`. The set of ids must
+// exactly match the existing registry (no adds/removes), or the call throws so
+// we never accidentally drop a project from the registry on a malformed input.
+export function reorderProjects(ids, dataDir = DATA_DIR) {
+    const projects = listProjects(dataDir);
+    const existingIds = projects.map(p => p.id);
+    const incoming = new Set(ids);
+    if (ids.length !== projects.length) {
+        throw new Error(`Reorder size mismatch: expected ${projects.length}, got ${ids.length}`);
+    }
+    for (const id of existingIds) {
+        if (!incoming.has(id))
+            throw new Error(`Reorder missing id: ${id}`);
+    }
+    const byId = new Map(projects.map(p => [p.id, p]));
+    const reordered = ids.map(id => byId.get(id)).filter(Boolean);
+    saveProjects(reordered, dataDir);
+    return reordered;
+}
+// ── Logo helpers ──────────────────────────────────────────────────────────────
+// Logos live as `data/<projectId>/<logo-filename>`. Filename includes a
+// timestamp suffix so replacing the logo changes its public URL → cache busts.
+export function setProjectLogo(id, filename, dataDir = DATA_DIR) {
+    const projects = listProjects(dataDir);
+    const idx = projects.findIndex(p => p.id === id);
+    if (idx === -1)
+        throw new Error(`Project not found: ${id}`);
+    projects[idx] = { ...projects[idx], logo: filename };
+    saveProjects(projects, dataDir);
+    return projects[idx];
+}
+export function clearProjectLogo(id, dataDir = DATA_DIR) {
+    const projects = listProjects(dataDir);
+    const idx = projects.findIndex(p => p.id === id);
+    if (idx === -1)
+        throw new Error(`Project not found: ${id}`);
+    const { logo: _omit, ...rest } = projects[idx];
+    void _omit;
+    projects[idx] = rest;
+    saveProjects(projects, dataDir);
+    return projects[idx];
+}
+export function getProjectLogoPath(id, dataDir = DATA_DIR) {
+    const project = getProject(id, dataDir);
+    if (!project?.logo)
+        return null;
+    // Defensive: refuse path-traversal in stored filename.
+    if (project.logo.includes('/') || project.logo.includes('..') || project.logo.includes('\\'))
+        return null;
+    return path.join(dataDir, id, project.logo);
+}
 export function deleteProject(id, dataDir = DATA_DIR) {
     if (id === 'default')
         throw new Error('Cannot delete the default project');
