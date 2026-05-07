@@ -1,8 +1,8 @@
 // src/client/api.ts — Typed API client (multi-project aware)
 import type {
-  PageNode, Asset, Settings, LLMMessage, ChatMessage, Project, LLMProfile,
+  PageNode, Asset, Settings, LLMMessage, ChatMessage, Project, LLMProfile, MdTemplate,
   PagesResponse, PageResponse, AssetsResponse, AssetResponse,
-  SettingsResponse, SuccessResponse, ProjectsResponse,
+  SettingsResponse, SuccessResponse, ProjectsResponse, TemplatesResponse,
 } from '../shared/types.js';
 
 const API_BASE = '/api';
@@ -117,6 +117,17 @@ export const api = {
   saveProfile: (profile: LLMProfile) => request<{ success: boolean; profile: LLMProfile }>('PUT', '/settings/profiles', profile),
   deleteProfile: (id: string) => request<SuccessResponse>('DELETE', `/settings/profiles/${id}`),
   setActiveProfile: (id: string) => request<SuccessResponse>('PUT', '/settings/profiles/active', { id }),
+
+  // ── MD Templates ───────────────────────────────────────────────────────────
+  getTemplates: () => request<TemplatesResponse>('GET', '/settings/templates'),
+  saveTemplate: (t: MdTemplate) => request<SuccessResponse>('PUT', '/settings/templates', t),
+  deleteTemplate: (id: string) => request<SuccessResponse>('DELETE', `/settings/templates/${id}`),
+
+  // ── Move ───────────────────────────────────────────────────────────────────
+  movePage: (id: string, targetParentId: string | null) =>
+    request<PageResponse>('PUT', `/pages/${id}/move`, { target_parent_id: targetParentId }),
+  moveAsset: (id: string, targetPageId: string | null) =>
+    request<SuccessResponse>('PATCH', `/assets/${id}`, { page_id: targetPageId }),
 
   // ── AI ─────────────────────────────────────────────────────────────────────
   generate: (data: AIGenerateParams) => request<{ content: string }>('POST', '/ai/generate', data),

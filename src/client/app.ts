@@ -69,6 +69,11 @@ declare global {
     openLightbox: (src: string, name: string) => void;
     copyToClipboard: (text: string) => void;
     deleteAsset: (id: string) => void;
+    openAssetCardMenu: (id: string, ev: MouseEvent) => void;
+    openChildCardMenu: (id: string, ev: MouseEvent) => void;
+    closeCardMenu: () => void;
+    closeMoveModal: () => void;
+    submitMove: () => void;
     renamePagePrompt: (id: string, name: string) => void;
     deletePageConfirm: (id: string, name: string) => void;
     submitRename: () => void;
@@ -174,6 +179,11 @@ async function init(): Promise<void> {
   window.openLightbox = openLightbox;
   window.copyToClipboard = copyToClipboard;
   window.deleteAsset = deleteAsset;
+  window.openAssetCardMenu = openAssetCardMenu;
+  window.openChildCardMenu = openChildCardMenu;
+  window.closeCardMenu = closeCardMenu;
+  window.closeMoveModal = closeMoveModal;
+  window.submitMove = submitMove;
   window.renamePagePrompt = renamePagePrompt;
   window.deletePageConfirm = deletePageConfirm;
   window.submitRename = submitRename;
@@ -1003,19 +1013,36 @@ function renderWysiwygEditor(page: PageNode, container: HTMLElement): void {
 
   const { Editor, Extension, InputRule, StarterKit, TaskList, TaskItem, Placeholder, Table, TableRow, TableCell, TableHeader, Underline, Link, ListKeymap } = window.TipTapBundle;
 
+  // Trigger a task list when the user types `[]`, `[ ]`, `[x]`, or `[X]`
+  // (with optional inner whitespace) followed by a space at the start of a
+  // block. If the cursor is currently inside a `bulletList` (because the
+  // user just typed `- ` first, which auto-wrapped them in a bullet), we
+  // `clearNodes()` first to lift the paragraph out of the bulletList —
+  // otherwise `toggleTaskList()` would nest a `taskList` *inside* the
+  // bulletList, producing the visible "2-tab jump".
   const TaskBracketRule = Extension.create({
     name: 'taskBracketRule',
     addInputRules() {
       return [
         new InputRule({
-          find: /^\[\]\s$/,
-          handler: ({ chain, range }: { chain: () => { deleteRange: (r: unknown) => { toggleTaskList: () => { run: () => void } } }; range: unknown }) => {
-            chain().deleteRange(range).toggleTaskList().run();
+          find: /^\[\s*[xX]?\s*\]\s$/,
+          handler: ({ chain, range }: {
+            chain: () => {
+              deleteRange: (r: unknown) => {
+                clearNodes: () => {
+                  toggleTaskList: () => { run: () => void };
+                };
+              };
+            };
+            range: unknown;
+          }) => {
+            chain().deleteRange(range).clearNodes().toggleTaskList().run();
           },
         }),
       ];
     },
   });
+
 
   const initialHtml = page.content ? renderMarkdown(page.content) : '';
 
@@ -1047,6 +1074,22 @@ function renderWysiwygEditor(page: PageNode, container: HTMLElement): void {
     autofocus: true,
     editorProps: {
       attributes: { class: 'tiptap-content', spellcheck: 'true' },
+      // Copy/cut → write markdown to the clipboard's text/plain MIME type so
+      // pasting outside the editor (chat, terminal, another app) lands as
+      // proper Markdown instead of unstyled plain text. text/html still
+      // carries the rich representation, so paste-back into TipTap (or
+      // another rich editor) keeps full formatting.
+      clipboardTextSerializer: (slice: { content: { toJSON: () => unknown } }) => {
+        const json = slice.content.toJSON() as TipTapDoc[] | undefined;
+        if (!json || !json.length) return '';
+        const allInline = json.every(
+          n => n.type === 'text' || n.type === 'hardBreak',
+        );
+        const content: TipTapDoc[] = allInline
+          ? [{ type: 'paragraph', content: json }]
+          : json;
+        return tiptapToMarkdown({ type: 'doc', content }).replace(/\n+$/, '');
+      },
     },
     onUpdate({ editor }: { editor: { getJSON: () => TipTapDoc } }) {
       const md = tiptapToMarkdown(editor.getJSON());
@@ -1488,6 +1531,7 @@ function renderFolderView(page: PageNode, container: HTMLElement): void {
                 </div>
                 <div class="child-card-name">${esc(childName)}</div>
                 <div class="child-card-meta">${child.type === 'folder' ? `${(state.pages.filter(p => p.parent_id === child.id).length + ((child as any).asset_count || 0))} items` : ext.toUpperCase() || 'MD'}</div>
+                <button class="child-card-menu-btn" onclick="openChildCardMenu('${child.id}', event)" title="Actions" aria-label="Actions">⋯</button>
               </div>
             `;
   }).join('')}
@@ -1520,44 +1564,250 @@ function renderAssetsSection(page: PageNode): string {
         <div class="section-heading">Images &amp; Media · ${imgs.length}</div>
         <div class="asset-grid">
           ${imgs.map(a => `
-            <div class="asset-card">
+            <div class="asset-card" onclick="openLightbox('${api.assetUrl(a.id)}','${esc(a.original_name)}')">
               <div class="asset-preview">
                 <img src="${api.assetUrl(a.id)}" alt="${esc(a.original_name)}" loading="lazy">
-                <div class="asset-overlay">
-                  <button class="asset-overlay-btn" onclick="openLightbox('${api.assetUrl(a.id)}','${esc(a.original_name)}')" title="View">👁</button>
-                  <button class="asset-overlay-btn" onclick="copyToClipboard('${api.assetUrl(a.id)}')" title="Copy URL">📋</button>
-                  <button class="asset-overlay-btn" onclick="deleteAsset('${a.id}')" title="Delete" style="color:var(--danger)">🗑</button>
-                </div>
               </div>
               <div class="asset-info">
                 <div class="asset-name">${esc(a.original_name)}</div>
                 <div class="asset-type">${(a.size / 1024).toFixed(1)} KB</div>
               </div>
+              <button class="asset-menu-btn" onclick="openAssetCardMenu('${a.id}', event)" title="Actions" aria-label="Actions">⋯</button>
             </div>
           `).join('')}
         </div>
       ` : ''}
       ${files.length ? `
         <div class="section-heading" style="margin-top:${imgs.length ? '24px' : 0}">Files · ${files.length}</div>
-        ${files.map(a => {
-    const ext = a.original_name.split('.').pop()?.toUpperCase() || '';
+        <div class="file-asset-grid">
+          ${files.map(a => {
+    const ext = (a.original_name.split('.').pop() || '').toUpperCase().slice(0, 4);
+    const sizeKb = a.size / 1024;
+    const sizeLabel = sizeKb >= 1024 ? `${(sizeKb / 1024).toFixed(1)} MB` : `${sizeKb.toFixed(1)} KB`;
     return `
-            <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);padding:12px 16px;display:flex;align-items:center;gap:12px;margin-bottom:7px;">
-              <div style="font-size:24px;flex-shrink:0">📄</div>
-              <div style="flex:1;min-width:0">
-                <div style="font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.original_name)}</div>
-                <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text-dim)">${ext} · ${(a.size / 1024).toFixed(1)} KB</div>
+            <div class="file-asset-card" data-ext="${ext.toLowerCase()}" onclick="window.open('${api.assetUrl(a.id)}','_blank')">
+              <div class="file-asset-icon"><span class="file-asset-ext">${ext || 'FILE'}</span></div>
+              <div class="file-asset-info">
+                <div class="file-asset-name">${esc(a.original_name)}</div>
+                <div class="file-asset-meta">${sizeLabel}</div>
               </div>
-              <div style="display:flex;gap:6px">
-                <a href="${api.assetUrl(a.id)}" download="${esc(a.original_name)}" class="btn btn-ghost btn-sm">↓ Download</a>
-                <button class="btn btn-danger btn-sm" onclick="deleteAsset('${a.id}')">Delete</button>
-              </div>
+              <button class="asset-menu-btn asset-menu-btn--inline" onclick="openAssetCardMenu('${a.id}', event)" title="Actions" aria-label="Actions">⋯</button>
             </div>
           `;
   }).join('')}
+        </div>
       ` : ''}
     </div>
   `;
+}
+
+interface CardMenuItem {
+  label: string;
+  icon?: string;
+  href?: string;
+  target?: string;
+  download?: string;
+  danger?: boolean;
+  submenu?: CardMenuItem[];
+  onClick?: () => void;
+}
+
+const SVG_ATTRS = 'xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+const ICON = {
+  externalLink: `<svg ${SVG_ATTRS}><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>`,
+  download: `<svg ${SVG_ATTRS}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>`,
+  copy: `<svg ${SVG_ATTRS}><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>`,
+  trash: `<svg ${SVG_ATTRS}><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>`,
+  pencil: `<svg ${SVG_ATTRS}><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>`,
+  arrowRight: `<svg ${SVG_ATTRS}><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>`,
+  folderMove: `<svg ${SVG_ATTRS}><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="9" y1="14" x2="15" y2="14"/><polyline points="12 11 15 14 12 17"/></svg>`,
+  plus: `<svg ${SVG_ATTRS}><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></svg>`,
+  fileText: `<svg ${SVG_ATTRS}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>`,
+  folder: `<svg ${SVG_ATTRS}><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`,
+  chevronRight: `<svg ${SVG_ATTRS}><polyline points="9 18 15 12 9 6"/></svg>`,
+  chevronDown: `<svg ${SVG_ATTRS}><polyline points="6 9 12 15 18 9"/></svg>`,
+};
+
+let _activeMenuTrigger: HTMLElement | null = null;
+let _hoverSubmenuTimer: ReturnType<typeof setTimeout> | null = null;
+
+type MenuAnchor = HTMLElement | { x: number; y: number };
+
+function renderMenuItems(items: CardMenuItem[]): string {
+  return items.map((it, i) => {
+    const cls = `floating-card-menu-item${it.danger ? ' danger' : ''}${it.submenu ? ' has-submenu' : ''}`;
+    const icon = `<span class="floating-card-menu-icon" aria-hidden="true">${it.icon || ''}</span>`;
+    const label = `<span class="floating-card-menu-label">${esc(it.label)}</span>`;
+    const arrow = it.submenu
+      ? `<span class="floating-card-menu-chevron" aria-hidden="true">${ICON.chevronRight}</span>`
+      : '';
+    if (it.href) {
+      const tgt = it.target ? ` target="${it.target}" rel="noopener"` : '';
+      const dl = it.download ? ` download="${esc(it.download)}"` : '';
+      return `<a class="${cls}" href="${it.href}"${tgt}${dl} data-idx="${i}">${icon}${label}${arrow}</a>`;
+    }
+    return `<button class="${cls}" data-idx="${i}" type="button">${icon}${label}${arrow}</button>`;
+  }).join('');
+}
+
+function positionFloatingMenu(
+  menu: HTMLElement,
+  anchor: MenuAnchor,
+  opts: { preferRight?: boolean } = {},
+): void {
+  const margin = 8;
+  const gap = 6;
+  const menuRect = menu.getBoundingClientRect();
+  let left: number;
+  let top: number;
+
+  if (anchor instanceof HTMLElement) {
+    const r = anchor.getBoundingClientRect();
+    if (opts.preferRight) {
+      // Submenu — place to the right of the parent item.
+      left = r.right + 4;
+      if (left + menuRect.width > window.innerWidth - margin) {
+        left = r.left - menuRect.width - 4;
+      }
+      top = r.top;
+      if (top + menuRect.height > window.innerHeight - margin) {
+        top = window.innerHeight - menuRect.height - margin;
+      }
+    } else {
+      left = r.left;
+      top = r.bottom + gap;
+      if (top + menuRect.height > window.innerHeight - margin) {
+        const aboveTop = r.top - menuRect.height - gap;
+        if (aboveTop >= margin) top = aboveTop;
+      }
+    }
+  } else {
+    left = anchor.x;
+    top = anchor.y;
+    if (top + menuRect.height > window.innerHeight - margin) {
+      top = window.innerHeight - menuRect.height - margin;
+    }
+  }
+
+  if (left + menuRect.width > window.innerWidth - margin) {
+    left = window.innerWidth - menuRect.width - margin;
+  }
+  if (left < margin) left = margin;
+  if (top < margin) top = margin;
+
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+}
+
+function attachItemHandlers(
+  menu: HTMLElement,
+  items: CardMenuItem[],
+  isSubmenu: boolean,
+): void {
+  menu.querySelectorAll<HTMLElement>('[data-idx]').forEach(el => {
+    const idx = Number(el.dataset.idx);
+    const item = items[idx];
+    if (!item) return;
+
+    if (item.submenu) {
+      const openIt = () => openSubmenu(el, item.submenu!);
+      el.addEventListener('mouseenter', () => {
+        if (_hoverSubmenuTimer) clearTimeout(_hoverSubmenuTimer);
+        _hoverSubmenuTimer = setTimeout(openIt, 80);
+      });
+      el.addEventListener('mouseleave', () => {
+        if (_hoverSubmenuTimer) { clearTimeout(_hoverSubmenuTimer); _hoverSubmenuTimer = null; }
+      });
+      el.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); openIt(); });
+    } else {
+      el.addEventListener('click', () => {
+        closeCardMenu();
+        item.onClick?.();
+      });
+      // Hovering a non-submenu item closes any open submenu in the parent menu.
+      if (!isSubmenu) {
+        el.addEventListener('mouseenter', () => closeSubmenu());
+      }
+    }
+  });
+}
+
+function openCardMenu(anchor: MenuAnchor, items: CardMenuItem[]): void {
+  const menu = $('floating-card-menu');
+  if (!menu) return;
+
+  const anchorEl = anchor instanceof HTMLElement ? anchor : null;
+  if (anchorEl && _activeMenuTrigger === anchorEl) { closeCardMenu(); return; }
+  closeCardMenu();
+
+  menu.innerHTML = renderMenuItems(items);
+  attachItemHandlers(menu, items, false);
+
+  if (anchorEl) {
+    anchorEl.classList.add('active');
+    _activeMenuTrigger = anchorEl;
+  }
+
+  menu.classList.add('open');
+  positionFloatingMenu(menu, anchor);
+}
+
+function openSubmenu(parentItem: HTMLElement, items: CardMenuItem[]): void {
+  const sub = $('floating-card-submenu');
+  if (!sub) return;
+  // Highlight the parent item while submenu is open
+  const menu = $('floating-card-menu');
+  menu?.querySelectorAll('.floating-card-menu-item.has-submenu.submenu-open')
+    .forEach(el => el.classList.remove('submenu-open'));
+  parentItem.classList.add('submenu-open');
+
+  sub.innerHTML = renderMenuItems(items);
+  attachItemHandlers(sub, items, true);
+  sub.classList.add('open');
+  positionFloatingMenu(sub, parentItem, { preferRight: true });
+}
+
+function closeSubmenu(): void {
+  $('floating-card-submenu')?.classList.remove('open');
+  if (_hoverSubmenuTimer) { clearTimeout(_hoverSubmenuTimer); _hoverSubmenuTimer = null; }
+  document.querySelectorAll('.floating-card-menu-item.submenu-open')
+    .forEach(el => el.classList.remove('submenu-open'));
+}
+
+function closeCardMenu(): void {
+  closeSubmenu();
+  $('floating-card-menu')?.classList.remove('open');
+  if (_activeMenuTrigger) {
+    _activeMenuTrigger.classList.remove('active');
+    _activeMenuTrigger = null;
+  }
+}
+
+function openAssetCardMenu(assetId: string, ev: MouseEvent): void {
+  ev.stopPropagation();
+  const a = state.currentPage?.assets?.find(x => x.id === assetId);
+  if (!a) return;
+  const url = api.assetUrl(a.id);
+  openCardMenu(ev.currentTarget as HTMLElement, [
+    { label: 'Open in new tab', icon: ICON.externalLink, href: url, target: '_blank' },
+    { label: 'Download', icon: ICON.download, href: url, download: a.original_name },
+    { label: 'Copy URL', icon: ICON.copy, onClick: () => copyToClipboard(url) },
+    { label: 'Move to…', icon: ICON.folderMove, onClick: () => openMoveModal('asset', a.id) },
+    { label: 'Delete', icon: ICON.trash, danger: true, onClick: () => deleteAsset(a.id) },
+  ]);
+}
+
+function openChildCardMenu(pageId: string, ev: MouseEvent): void {
+  ev.stopPropagation();
+  const c = state.pages.find(p => p.id === pageId);
+  if (!c) return;
+  const name = c.display_name || c.name;
+  openCardMenu(ev.currentTarget as HTMLElement, [
+    { label: 'Open', icon: ICON.arrowRight, onClick: () => navigateTo(c.id) },
+    { label: 'Rename', icon: ICON.pencil, onClick: () => renamePagePrompt(c.id, name) },
+    { label: 'Move to…', icon: ICON.folderMove, onClick: () => openMoveModal('page', c.id) },
+    { label: 'Delete', icon: ICON.trash, danger: true, onClick: () => deletePageConfirm(c.id, name) },
+  ]);
 }
 
 function renderUploadZone(pageId: string): string {
@@ -1950,13 +2200,48 @@ async function submitRename(): Promise<void> {
   const newName = ($('rename-input') as HTMLInputElement).value.trim();
   if (!newName) return;
   $('rename-overlay').classList.remove('open');
+
+  const oldId = _renameId;
+  // Capture paths BEFORE the API call. The id is base64url(path) so any
+  // rename of a page/folder produces a NEW id; if the user was viewing the
+  // renamed item — or a descendant of it — their state.currentPageId is
+  // about to become stale.
+  const oldRenamedPath = state.pages.find(p => p.id === oldId)?.path ?? '';
+  const viewedOldPath = state.currentPage?.path ?? '';
+
   try {
-    await api.updatePage(_renameId, { name: newName });
+    const res = await api.updatePage(oldId, { name: newName });
+    const newId = res.page.id;
+    const newRenamedPath = res.page.path;
+
     await loadPages();
-    if (state.currentPageId === _renameId && state.currentPage) {
-      state.currentPage.display_name = newName;
-      ($('page-title') as HTMLInputElement).value = newName;
+
+    let targetId: string | null = null;
+    if (state.currentPageId === oldId) {
+      // Viewing the renamed item itself.
+      targetId = newId;
+    } else if (
+      oldRenamedPath
+      && newRenamedPath
+      && viewedOldPath
+      && viewedOldPath.startsWith(oldRenamedPath + '/')
+    ) {
+      // Viewing a descendant of the renamed folder — remap its path.
+      const remapped = newRenamedPath + viewedOldPath.slice(oldRenamedPath.length);
+      const target = state.pages.find(p => p.path === remapped);
+      if (target) targetId = target.id;
     }
+
+    if (targetId) {
+      // Force navigation: navigateTo bails early when ids match.
+      state.currentPageId = null;
+      await navigateTo(targetId);
+    } else if (state.currentPageId && state.pages.find(p => p.id === state.currentPageId)) {
+      // Unrelated rename — re-render so any child cards or breadcrumbs
+      // referencing the renamed item pick up its new name.
+      await renderPage(state.currentPageId);
+    }
+
     showToast('Renamed!');
   } catch (err) {
     showToast('Rename failed: ' + (err as Error).message, 'error');
@@ -1967,6 +2252,268 @@ function deletePageConfirm(id: string, name: string): void {
   _deleteId = id;
   ($('delete-page-name') as HTMLElement).textContent = `"${name}"`;
   $('delete-overlay').classList.add('open');
+}
+
+// ── Move (page or asset) ─────────────────────────────────────────────────────
+type MoveTarget =
+  | { kind: 'page'; id: string; name: string; currentParentId: string | null }
+  | { kind: 'asset'; id: string; name: string; currentPageId: string | null };
+
+let _moveTarget: MoveTarget | null = null;
+
+interface MoveOption {
+  value: string;          // folder id, or empty string for "Root level"
+  shortLabel: string;     // last path segment, shown in the option row
+  fullLabel: string;      // full path, shown in the trigger after selection
+  depth: number;          // 0 for top-level rows, increments for nesting
+  isCurrent?: boolean;    // marks the user's current parent — disabled
+}
+
+let _moveSelection: { value: string; label: string } | null = null;
+
+function buildFolderOptionsTree(
+  blockedIds: Set<string>,
+): Array<{ id: string; shortLabel: string; fullLabel: string; depth: number }> {
+  const folders = state.pages.filter(p => p.type === 'folder' && !blockedIds.has(p.id));
+  const byParent = new Map<string | null, PageNode[]>();
+  for (const f of folders) {
+    const key = f.parent_id ?? null;
+    const list = byParent.get(key) ?? [];
+    list.push(f);
+    byParent.set(key, list);
+  }
+  for (const list of byParent.values()) {
+    list.sort((a, b) => (a.display_name || a.name).localeCompare(b.display_name || b.name));
+  }
+  const out: Array<{ id: string; shortLabel: string; fullLabel: string; depth: number }> = [];
+  const walk = (parentId: string | null, prefix: string, depth: number): void => {
+    const list = byParent.get(parentId) ?? [];
+    for (const f of list) {
+      const name = f.display_name || f.name;
+      const fullPath = prefix ? `${prefix} / ${name}` : name;
+      out.push({ id: f.id, shortLabel: name, fullLabel: fullPath, depth });
+      walk(f.id, fullPath, depth + 1);
+    }
+  };
+  walk(null, '', 0);
+  return out;
+}
+
+function renderMovePanel(options: MoveOption[]): void {
+  const panel = $('move-target-panel');
+  if (!panel) return;
+  if (!options.length) {
+    panel.innerHTML = `<div class="custom-select-empty">No folders available</div>`;
+    return;
+  }
+  panel.innerHTML = options.map((opt, i) => {
+    const indent = `<span class="custom-select-option-indent" style="--depth:${opt.depth * 14}px"></span>`;
+    const icon = `<span class="custom-select-option-icon" aria-hidden="true">${ICON.folder}</span>`;
+    const badge = opt.isCurrent
+      ? `<span class="custom-select-option-current">current</span>`
+      : '';
+    const disabled = opt.isCurrent ? 'disabled' : '';
+    return `<button type="button" class="custom-select-option" data-value="${esc(opt.value)}" data-label="${esc(opt.fullLabel)}" data-idx="${i}" data-depth="${opt.depth}" ${disabled}>${indent}${icon}<span class="custom-select-label">${esc(opt.shortLabel)}</span>${badge}</button>`;
+  }).join('');
+
+  panel.querySelectorAll<HTMLButtonElement>('.custom-select-option').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (btn.disabled) return;
+      const value = btn.dataset.value || '';
+      const label = btn.dataset.label || '';
+      _moveSelection = { value, label };
+      const labelEl = $('move-target-label');
+      labelEl.textContent = label;
+      labelEl.classList.remove('placeholder');
+      panel.querySelectorAll('.custom-select-option.selected').forEach(el => el.classList.remove('selected'));
+      btn.classList.add('selected');
+      closeMoveTargetPanel();
+    });
+  });
+}
+
+function positionMoveTargetPanel(): void {
+  const wrapper = $('move-target-select');
+  if (!wrapper.classList.contains('open')) return;
+  const trigger = $('move-target-trigger');
+  const panel = $('move-target-panel');
+
+  // Reset before measuring (panel is position:fixed)
+  panel.style.top = '0px';
+  panel.style.left = '0px';
+  panel.style.width = `${trigger.getBoundingClientRect().width}px`;
+
+  const tRect = trigger.getBoundingClientRect();
+  const pRect = panel.getBoundingClientRect();
+  const margin = 8;
+  const gap = 6;
+
+  let top = tRect.bottom + gap;
+  if (top + pRect.height > window.innerHeight - margin) {
+    const aboveTop = tRect.top - pRect.height - gap;
+    if (aboveTop >= margin) top = aboveTop;
+    else top = window.innerHeight - pRect.height - margin;
+  }
+  let left = tRect.left;
+  if (left + pRect.width > window.innerWidth - margin) {
+    left = window.innerWidth - pRect.width - margin;
+  }
+  if (left < margin) left = margin;
+  if (top < margin) top = margin;
+
+  panel.style.top = `${top}px`;
+  panel.style.left = `${left}px`;
+}
+
+function closeMoveTargetPanel(): void {
+  $('move-target-select')?.classList.remove('open');
+}
+
+function openMoveModal(kind: 'page' | 'asset', id: string): void {
+  closeCardMenu();
+  const hint = $('move-item-hint');
+  const labelEl = $('move-target-label');
+  $('move-target-select').classList.remove('open');
+  _moveSelection = null;
+  labelEl.textContent = '— Pick a folder —';
+  labelEl.classList.add('placeholder');
+
+  const options: MoveOption[] = [];
+
+  if (kind === 'page') {
+    const p = state.pages.find(x => x.id === id);
+    if (!p) return;
+    const itemName = p.display_name || p.name;
+    const currentParentId = p.parent_id ?? null;
+
+    // Self + descendants are blocked — can't move into yourself.
+    const blocked = new Set<string>([id]);
+    const collect = (parentId: string): void => {
+      state.pages.forEach(c => {
+        if (c.parent_id === parentId && !blocked.has(c.id)) {
+          blocked.add(c.id);
+          if (c.type === 'folder') collect(c.id);
+        }
+      });
+    };
+    collect(id);
+
+    options.push({
+      value: '',
+      shortLabel: 'Root level',
+      fullLabel: 'Root level',
+      depth: 0,
+      isCurrent: currentParentId === null,
+    });
+    for (const f of buildFolderOptionsTree(blocked)) {
+      options.push({
+        value: f.id,
+        shortLabel: f.shortLabel,
+        fullLabel: f.fullLabel,
+        depth: f.depth,
+        isCurrent: f.id === currentParentId,
+      });
+    }
+
+    hint.textContent = `Moving "${itemName}" to a different folder.`;
+    _moveTarget = { kind: 'page', id, name: itemName, currentParentId };
+  } else {
+    const a = state.currentPage?.assets?.find(x => x.id === id);
+    if (!a) return;
+    const itemName = a.original_name;
+    const currentPageId = a.page_id ?? null;
+
+    for (const f of buildFolderOptionsTree(new Set())) {
+      options.push({
+        value: f.id,
+        shortLabel: f.shortLabel,
+        fullLabel: f.fullLabel,
+        depth: f.depth,
+        isCurrent: f.id === currentPageId,
+      });
+    }
+
+    hint.textContent = `Moving "${itemName}" to a different folder.`;
+    _moveTarget = { kind: 'asset', id, name: itemName, currentPageId };
+  }
+
+  renderMovePanel(options);
+  $('move-item-overlay').classList.add('open');
+}
+
+function closeMoveModal(): void {
+  $('move-item-overlay').classList.remove('open');
+  $('move-target-select').classList.remove('open');
+  _moveTarget = null;
+  _moveSelection = null;
+}
+
+async function submitMove(): Promise<void> {
+  const t = _moveTarget;
+  if (!t) return;
+  if (!_moveSelection) {
+    showToast('Pick a destination', 'error');
+    return;
+  }
+  const targetValue = _moveSelection.value;
+
+  // Capture paths BEFORE the API call. A page move changes the id (id is
+  // base64url of the path), so if the user is viewing the moved item — or a
+  // descendant of it — state.currentPageId is about to become stale and a
+  // straight renderPage() would 404 with "Page not found".
+  const oldMovedPath = t.kind === 'page'
+    ? state.pages.find(p => p.id === t.id)?.path ?? ''
+    : '';
+  const viewedOldPath = state.currentPage?.path ?? '';
+
+  closeMoveModal();
+  try {
+    let newMovedPath = '';
+    if (t.kind === 'page') {
+      const res = await api.movePage(t.id, targetValue || null);
+      newMovedPath = res.page.path;
+    } else {
+      if (!targetValue) { showToast('Pick a destination', 'error'); return; }
+      await api.moveAsset(t.id, targetValue);
+    }
+
+    await loadPages();
+
+    let targetId: string | null = null;
+    if (t.kind === 'page') {
+      if (state.currentPageId === t.id) {
+        // Viewing the moved item itself — find it at its new path.
+        const moved = state.pages.find(p => p.path === newMovedPath);
+        if (moved) targetId = moved.id;
+      } else if (
+        oldMovedPath
+        && newMovedPath
+        && viewedOldPath
+        && viewedOldPath.startsWith(oldMovedPath + '/')
+      ) {
+        // Viewing a descendant of the moved folder — remap its path.
+        const remapped = newMovedPath + viewedOldPath.slice(oldMovedPath.length);
+        const target = state.pages.find(p => p.path === remapped);
+        if (target) targetId = target.id;
+      }
+    }
+
+    if (targetId) {
+      // Force navigation: navigateTo bails early when ids match.
+      state.currentPageId = null;
+      await navigateTo(targetId);
+    } else if (state.currentPageId && state.pages.find(p => p.id === state.currentPageId)) {
+      // Unrelated move (or asset move) — re-render so child cards/breadcrumbs update.
+      await renderPage(state.currentPageId);
+    } else if (state.currentPageId) {
+      // Edge case: current page somehow no longer exists.
+      showWelcome();
+    }
+
+    showToast('Moved!');
+  } catch (err) {
+    showToast('Move failed: ' + (err as Error).message, 'error');
+  }
 }
 
 async function submitDelete(): Promise<void> {
@@ -1992,30 +2539,42 @@ async function submitDelete(): Promise<void> {
   }
 }
 
-// ── Context menu ──────────────────────────────────────────────────────────────
-const ctxMenu = document.createElement('div');
-ctxMenu.className = 'ctx-menu';
-ctxMenu.id = 'ctx-menu';
-document.body.appendChild(ctxMenu);
-
+// ── Sidebar right-click context menu (uses unified floating-card-menu) ───────
 function showCtxMenu(e: Event, page: PageNode): void {
   e.preventDefault();
+  e.stopPropagation();
+  const me = e as MouseEvent;
   const displayName = page.display_name || page.name;
-  ctxMenu.innerHTML = `
-    <div class="ctx-menu-item" onclick="renamePagePrompt('${page.id}','${esc(displayName)}')">✏️ Rename</div>
-    ${page.type === 'folder' ? `
-      <div class="ctx-menu-item" onclick="openNewPageModal('page','${page.id}')">📄 Add Page Inside</div>
-      <div class="ctx-menu-item" onclick="openNewPageModal('folder','${page.id}')">📁 Add Folder Inside</div>
-    ` : ''}
-    <div class="ctx-menu-sep"></div>
-    <div class="ctx-menu-item danger" onclick="deletePageConfirm('${page.id}','${esc(displayName)}')">🗑 Delete</div>
-  `;
-  ctxMenu.style.left = `${Math.min((e as MouseEvent).clientX, window.innerWidth - 180)}px`;
-  ctxMenu.style.top = `${Math.min((e as MouseEvent).clientY, window.innerHeight - 120)}px`;
-  ctxMenu.classList.add('open');
-}
 
-document.addEventListener('click', () => ctxMenu.classList.remove('open'));
+  const items: CardMenuItem[] = [];
+
+  if (page.type === 'page') {
+    items.push({ label: 'Open', icon: ICON.arrowRight, onClick: () => navigateTo(page.id) });
+  }
+  items.push({ label: 'Rename', icon: ICON.pencil, onClick: () => renamePagePrompt(page.id, displayName) });
+
+  if (page.type === 'folder') {
+    items.push({
+      label: 'Add…',
+      icon: ICON.plus,
+      submenu: [
+        { label: 'Page', icon: ICON.fileText, onClick: () => openNewPageModal('page', page.id) },
+        { label: 'Folder', icon: ICON.folder, onClick: () => openNewPageModal('folder', page.id) },
+      ],
+    });
+  }
+
+  // Move: pages always; folders only if they have a parent (subfolder).
+  // Top-level folders cannot be moved (they have nowhere else to go).
+  const isMovable = page.type === 'page' || (page.type === 'folder' && !!page.parent_id);
+  if (isMovable) {
+    items.push({ label: 'Move to…', icon: ICON.folderMove, onClick: () => openMoveModal('page', page.id) });
+  }
+
+  items.push({ label: 'Delete', icon: ICON.trash, danger: true, onClick: () => deletePageConfirm(page.id, displayName) });
+
+  openCardMenu({ x: me.clientX, y: me.clientY }, items);
+}
 
 
 
@@ -2469,31 +3028,68 @@ function renderMarkdown(text: string): string {
   const result = marked.parse(text || '', { async: false, gfm: true, breaks: false });
   const html = typeof result === 'string' ? result : `<pre>${esc(text || '')}</pre>`;
 
-  // Convert marked's GFM checkbox output to TipTap taskList/taskItem.
-  // marked produces:
-  //   tight: <ul>\n<li><input type="checkbox" disabled=""> text</li>\n</ul>
-  //   loose: <ul>\n<li><input ...> <p>text</p>\n</li>\n</ul>
-  return html.replace(
-    /<ul[^>]*>([\s\S]*?)<\/ul>/g,
-    (fullMatch, inner) => {
-      if (!/<input[^>]+type="checkbox"/.test(inner)) return fullMatch;
-      const converted = inner.replace(
-        /<li>([\s\S]*?)<\/li>/g,
-        (_m: string, content: string) => {
-          const cbMatch = content.match(/<input([^>]*)type="checkbox"([^>]*)>/);
-          if (!cbMatch) return `<li>${content}</li>`;
-          const allAttrs = (cbMatch[1] || '') + (cbMatch[2] || '');
-          const isChecked = /checked/.test(allAttrs);
-          let itemHtml = content.replace(/<input[^>]+type="checkbox"[^>]*>/g, '').trim();
-          // Unwrap loose <p> wrapper if present
-          itemHtml = itemHtml.replace(/^<p>([\s\S]*?)<\/p>$/, '$1').trim();
-          return `<li data-type="taskItem" ${isChecked ? 'data-checked="true"' : 'data-checked="false"'}>` +
-            `<label><input type="checkbox" ${isChecked ? 'checked' : ''}><span>${itemHtml}</span></label></li>`;
+  // Convert marked's GFM checkbox output into TipTap taskList/taskItem markup
+  // by walking the parsed DOM. This handles nested lists correctly — the
+  // previous regex-based version captured from an outer <ul> to the FIRST
+  // closing </ul>, which is the inner one when a task item has nested
+  // bullets, producing malformed HTML and breaking round-trip saves.
+  const wrapper = document.createElement('div');
+  wrapper.innerHTML = html;
+
+  for (const ul of Array.from(wrapper.querySelectorAll('ul'))) {
+    const directLis = Array.from(ul.children).filter(
+      (c): c is HTMLLIElement => c.tagName === 'LI',
+    );
+    if (!directLis.length) continue;
+
+    const isTaskList = directLis.some(li =>
+      li.querySelector(':scope > input[type="checkbox"], :scope > p > input[type="checkbox"]'),
+    );
+    if (!isTaskList) continue;
+
+    ul.setAttribute('data-type', 'taskList');
+
+    for (const li of directLis) {
+      const cb = li.querySelector(
+        ':scope > input[type="checkbox"], :scope > p > input[type="checkbox"]',
+      ) as HTMLInputElement | null;
+      if (!cb) continue;
+
+      const isChecked = cb.hasAttribute('checked') || cb.checked;
+
+      // Capture the leading inline content (everything up to the first nested
+      // <ul>/<ol>) and leave nested lists in place as siblings of <label>.
+      let leadingHtml = '';
+      const leadingP = li.querySelector(':scope > p');
+      if (leadingP && leadingP.contains(cb)) {
+        // Loose form: <li><p><input> text</p>...nested...</li>
+        cb.remove();
+        leadingHtml = leadingP.innerHTML.trim();
+        leadingP.remove();
+      } else {
+        // Tight form: <li><input> text...nested...</li>
+        cb.remove();
+        const buf = document.createElement('div');
+        for (const child of Array.from(li.childNodes)) {
+          if (child.nodeType === Node.ELEMENT_NODE) {
+            const tag = (child as Element).tagName;
+            if (tag === 'UL' || tag === 'OL') break;
+          }
+          buf.appendChild(child); // moves the node out of li
         }
-      );
-      return `<ul data-type="taskList">${converted}</ul>`;
+        leadingHtml = buf.innerHTML.trim();
+      }
+
+      li.setAttribute('data-type', 'taskItem');
+      li.setAttribute('data-checked', isChecked ? 'true' : 'false');
+
+      const label = document.createElement('label');
+      label.innerHTML = `<input type="checkbox"${isChecked ? ' checked' : ''}><span>${leadingHtml}</span>`;
+      li.insertBefore(label, li.firstChild);
     }
-  );
+  }
+
+  return wrapper.innerHTML;
 }
 
 // ── HTML escape ───────────────────────────────────────────────────────────────
@@ -2528,6 +3124,15 @@ function setupEventListeners(): void {
       state.chatOpen = false;
       $('chat-drawer').classList.remove('open');
     }
+    const target = e.target as Element;
+    if (!target.closest('#floating-card-menu') && !target.closest('.asset-menu-btn') && !target.closest('.child-card-menu-btn')) {
+      closeCardMenu();
+    }
+  });
+  window.addEventListener('scroll', closeCardMenu, true);
+  window.addEventListener('resize', closeCardMenu);
+  document.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.key === 'Escape' && _activeMenuTrigger) closeCardMenu();
   });
 
   $('confirm-delete-cancel').addEventListener('click', () => closeConfirmDelete(false));
@@ -2537,6 +3142,30 @@ function setupEventListeners(): void {
   $('new-page-overlay').addEventListener('click', (e: MouseEvent) => { if (e.target === $('new-page-overlay')) closeNewPageModal(); });
   $('settings-overlay').addEventListener('click', (e: MouseEvent) => { if (e.target === $('settings-overlay')) closeSettings(); });
   $('lightbox').addEventListener('click', (e: MouseEvent) => { if (e.target === $('lightbox')) closeLightbox(); });
+  $('move-item-overlay').addEventListener('click', (e: MouseEvent) => { if (e.target === $('move-item-overlay')) closeMoveModal(); });
+
+  // Custom Move-target dropdown — toggle on trigger click, close on outside click
+  $('move-target-trigger').addEventListener('click', (e: MouseEvent) => {
+    e.stopPropagation();
+    const wrapper = $('move-target-select');
+    const wasOpen = wrapper.classList.contains('open');
+    wrapper.classList.toggle('open');
+    if (!wasOpen) positionMoveTargetPanel();
+  });
+  document.addEventListener('click', (e: MouseEvent) => {
+    const wrapper = $('move-target-select');
+    const panel = $('move-target-panel');
+    if (!wrapper) return;
+    const target = e.target as Node;
+    // Panel is position:fixed (rendered outside the wrapper in stacking, but
+    // still a DOM child) so wrapper.contains() still covers it.
+    if (!wrapper.contains(target) && !panel.contains(target)) {
+      wrapper.classList.remove('open');
+    }
+  });
+  // Reposition the panel when the modal scrolls or the viewport resizes.
+  window.addEventListener('resize', () => positionMoveTargetPanel());
+  window.addEventListener('scroll', () => positionMoveTargetPanel(), true);
   $('create-project-overlay').addEventListener('click', (e: MouseEvent) => { if (e.target === $('create-project-overlay')) closeCreateProjectModal(); });
   $('rename-project-overlay').addEventListener('click', (e: MouseEvent) => { if (e.target === $('rename-project-overlay')) closeRenameProjectModal(); });
 

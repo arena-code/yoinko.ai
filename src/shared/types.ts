@@ -83,6 +83,12 @@ export interface ImageResult {
   revised_prompt?: string;
 }
 
+export interface MdTemplate {
+  id: string;
+  name: string;
+  content: string;
+}
+
 // API response shapes
 export interface ProjectsResponse { projects: Project[] }
 export interface PagesResponse { pages: PageNode[] }
@@ -93,3 +99,4 @@ export interface SettingsResponse { settings: Settings }
 export interface HealthResponse { status: string; version: string; app: string }
 export interface ErrorResponse { error: string }
 export interface SuccessResponse { success: boolean }
+export interface TemplatesResponse { templates: MdTemplate[] }

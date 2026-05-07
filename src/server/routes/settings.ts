@@ -1,7 +1,7 @@
 // src/server/routes/settings.ts
 import express, { Request, Response } from 'express';
 import { getGlobalDb } from '../db.js';
-import type { Settings, LLMProfile } from '../../shared/types.js';
+import type { Settings, LLMProfile, MdTemplate } from '../../shared/types.js';
 import { dataDir } from '../request-helpers.js';
 
 const router = express.Router();
@@ -174,6 +174,51 @@ router.put('/profiles/active', (req: Request, res: Response) => {
     }
 
     upsertSetting(db, 'llm_active_profile', id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ── GET /api/settings/templates — list all MD templates ──────────────────────
+router.get('/templates', (req: Request, res: Response) => {
+  try {
+    const db = getGlobalDb(dataDir(req));
+    const raw = getSettingValue(db, 'md_templates');
+    const templates = raw ? (JSON.parse(raw) as MdTemplate[]) : [];
+    res.json({ templates });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ── PUT /api/settings/templates — create or update a template ────────────────
+router.put('/templates', (req: Request, res: Response) => {
+  try {
+    const db = getGlobalDb(dataDir(req));
+    const incoming = req.body as MdTemplate;
+    if (!incoming.id || !incoming.name) {
+      return void res.status(400).json({ error: 'id and name are required' });
+    }
+    const raw = getSettingValue(db, 'md_templates');
+    const templates: MdTemplate[] = raw ? JSON.parse(raw) : [];
+    const idx = templates.findIndex(t => t.id === incoming.id);
+    if (idx >= 0) { templates[idx] = incoming; } else { templates.push(incoming); }
+    upsertSetting(db, 'md_templates', JSON.stringify(templates));
+    res.json({ success: true, template: incoming });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ── DELETE /api/settings/templates/:id — delete a template ───────────────────
+router.delete('/templates/:id', (req: Request, res: Response) => {
+  try {
+    const db = getGlobalDb(dataDir(req));
+    const raw = getSettingValue(db, 'md_templates');
+    const templates: MdTemplate[] = raw ? JSON.parse(raw) : [];
+    const filtered = templates.filter(t => t.id !== req.params.id);
+    upsertSetting(db, 'md_templates', JSON.stringify(filtered));
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });

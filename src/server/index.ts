@@ -11,7 +11,7 @@ import settingsRouter from './routes/settings.js';
 import projectsRouter from './routes/projects.js';
 import authRouter from './routes/auth.js';
 import { migrateOnStartup } from './projects.js';
-import { cloudAuth } from './middleware/cloud-auth.js';
+import { cloudAuth, invalidateTenantCache } from './middleware/cloud-auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -39,6 +39,31 @@ app.use(express.static(publicDir, { index: false }));
 if (CLOUD_ENABLED) {
   app.use('/auth', authRouter);
 }
+
+// ── Admin endpoint: cache invalidation (before cloudAuth, shared-secret auth) ─
+// The website calls this when it removes a member or revokes access so the
+// notes app's tenant cache is busted immediately instead of waiting for TTL.
+app.post('/api/admin/invalidate-tenant-cache', (req, res) => {
+  const secret = process.env.YOINKO_ADMIN_SECRET;
+  if (!secret) {
+    res.status(503).json({ error: 'Admin endpoint not configured' });
+    return;
+  }
+  const auth = req.headers.authorization || '';
+  const provided = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  if (provided !== secret) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+  const userId = req.body?.userId;
+  if (typeof userId !== 'string' || userId.length === 0) {
+    res.status(400).json({ error: 'Missing userId' });
+    return;
+  }
+  const removed = invalidateTenantCache(userId);
+  console.log(`[admin] Invalidated cache for ${userId} (existed=${removed})`);
+  res.status(204).end();
+});
 
 // ── Cloud auth (no-op when YOINKO_CLOUD is not set) ───────────────────────────
 app.use(cloudAuth);

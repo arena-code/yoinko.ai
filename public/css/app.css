@@ -925,7 +925,6 @@ body {
   background: white;
   border: 2px solid var(--border-strong);
   border-radius: var(--radius-sm);
-  overflow: hidden;
   cursor: pointer;
   transition: all 0.15s ease;
   position: relative;
@@ -945,6 +944,8 @@ body {
   justify-content: center;
   overflow: hidden;
   position: relative;
+  border-top-left-radius: calc(var(--radius-sm) - 2px);
+  border-top-right-radius: calc(var(--radius-sm) - 2px);
 }
 
 .asset-preview img {
@@ -957,44 +958,482 @@ body {
   font-size: 28px;
 }
 
-.asset-overlay {
+.asset-menu-btn {
   position: absolute;
-  inset: 0;
-  background: rgba(26, 26, 46, 0.6);
-  backdrop-filter: blur(3px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-
-.asset-card:hover .asset-overlay {
-  opacity: 1;
-}
-
-.asset-overlay-btn {
-  width: 34px;
-  height: 34px;
-  border-radius: 8px;
-  border: 2px solid white;
-  background: rgba(255, 255, 255, 0.15);
-  color: #fff;
+  top: 6px;
+  right: 6px;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1.5px solid var(--border-strong);
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--ink);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.13s;
+  font-size: 18px;
+  line-height: 1;
+  padding: 0;
+  opacity: 1;
+  transition: background 0.13s, border-color 0.13s, color 0.13s;
+  z-index: 2;
 }
 
-.asset-overlay-btn:hover {
-  background: var(--tomato);
-  border-color: var(--tomato);
+.asset-menu-btn:hover,
+.asset-menu-btn.active {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
 }
-.asset-overlay-btn svg {
+
+.asset-menu-btn--inline {
+  position: relative;
+  top: auto;
+  right: auto;
+  flex-shrink: 0;
+  background: transparent;
+  border-color: transparent;
+}
+
+.file-asset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.file-asset-card {
+  position: relative;
+  background: white;
+  border: 2px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 10px 10px 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+
+.file-asset-card:hover {
+  border-color: var(--ink);
+  transform: translateY(-1px);
+  box-shadow: 3px 3px 0 var(--ink);
+}
+
+.file-asset-icon {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: var(--surface-3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid var(--border);
+}
+
+.file-asset-ext {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+  line-height: 1;
+}
+
+.file-asset-card[data-ext="pdf"] .file-asset-icon {
+  background: #fff1f0;
+  border-color: #ffd6d2;
+}
+.file-asset-card[data-ext="pdf"] .file-asset-ext {
+  color: #c53030;
+}
+
+.file-asset-card[data-ext="doc"] .file-asset-icon,
+.file-asset-card[data-ext="docx"] .file-asset-icon {
+  background: #ebf3ff;
+  border-color: #c5d8f5;
+}
+.file-asset-card[data-ext="doc"] .file-asset-ext,
+.file-asset-card[data-ext="docx"] .file-asset-ext {
+  color: #2563eb;
+}
+
+.file-asset-card[data-ext="xls"] .file-asset-icon,
+.file-asset-card[data-ext="xlsx"] .file-asset-icon,
+.file-asset-card[data-ext="csv"] .file-asset-icon {
+  background: #ecfdf3;
+  border-color: #c8eedd;
+}
+.file-asset-card[data-ext="xls"] .file-asset-ext,
+.file-asset-card[data-ext="xlsx"] .file-asset-ext,
+.file-asset-card[data-ext="csv"] .file-asset-ext {
+  color: #15803d;
+}
+
+.file-asset-card[data-ext="zip"] .file-asset-icon,
+.file-asset-card[data-ext="rar"] .file-asset-icon,
+.file-asset-card[data-ext="7z"] .file-asset-icon {
+  background: #f5f0ff;
+  border-color: #ddd0f5;
+}
+.file-asset-card[data-ext="zip"] .file-asset-ext,
+.file-asset-card[data-ext="rar"] .file-asset-ext,
+.file-asset-card[data-ext="7z"] .file-asset-ext {
+  color: #7c3aed;
+}
+
+.file-asset-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.file-asset-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.3;
+}
+
+.file-asset-meta {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-top: 2px;
+  letter-spacing: 0.03em;
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   FLOATING CARD MENU (shared, position:fixed, escapes stacking contexts)
+   ════════════════════════════════════════════════════════════════════════════ */
+.floating-card-menu {
+  position: fixed;
+  top: 0;
+  left: 0;
+  min-width: 184px;
+  background: white;
+  border: 2px solid var(--ink);
+  border-radius: 10px;
+  box-shadow: 4px 4px 0 var(--ink);
+  padding: 5px;
+  z-index: 99999;
+  flex-direction: column;
+  gap: 1px;
+  display: none;
+  transform-origin: top left;
+  animation: floating-card-menu-pop 0.14s cubic-bezier(0.2, 0.7, 0.3, 1.1);
+}
+
+.floating-card-menu.open {
+  display: flex;
+}
+
+@keyframes floating-card-menu-pop {
+  from { opacity: 0; transform: scale(0.94) translateY(-4px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.floating-card-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+  cursor: pointer;
+  border-radius: 6px;
+  text-decoration: none;
+  transition: background 0.1s, color 0.1s;
+  position: relative;
+}
+
+.floating-card-menu-item:hover,
+.floating-card-menu-item:focus-visible {
+  background: var(--surface-3, var(--surface-2));
+  outline: none;
+}
+
+.floating-card-menu-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  color: currentColor;
+  opacity: 0.85;
+}
+
+.floating-card-menu-icon svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+.floating-card-menu-item:hover .floating-card-menu-icon,
+.floating-card-menu-item:focus-visible .floating-card-menu-icon {
+  opacity: 1;
+}
+
+.floating-card-menu-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.floating-card-menu-item.danger {
+  color: var(--danger);
+}
+
+.floating-card-menu-item.danger:hover,
+.floating-card-menu-item.danger:focus-visible {
+  background: var(--danger);
+  color: #fff;
+}
+
+/* Visual divider above the first danger item (when it follows safe items) */
+.floating-card-menu-item:not(.danger) + .floating-card-menu-item.danger {
+  margin-top: 5px;
+}
+
+.floating-card-menu-item:not(.danger) + .floating-card-menu-item.danger::before {
+  content: '';
+  position: absolute;
+  top: -3px;
+  left: 8px;
+  right: 8px;
+  height: 1px;
+  background: var(--border);
+}
+
+/* Submenu chevron + open state */
+.floating-card-menu-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 14px;
   height: 14px;
+  margin-left: auto;
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+.floating-card-menu-chevron svg {
+  width: 12px;
+  height: 12px;
+}
+
+.floating-card-menu-item.has-submenu.submenu-open,
+.floating-card-menu-item.has-submenu.submenu-open .floating-card-menu-chevron {
+  background: var(--surface-3, var(--surface-2));
+  opacity: 1;
+}
+
+.floating-card-submenu {
+  /* Same as .floating-card-menu — the shared class supplies all visuals.
+     This selector exists so JS can target the submenu element distinctly. */
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   CUSTOM SELECT (used in the Move modal — matches floating-card-menu look)
+   ════════════════════════════════════════════════════════════════════════════ */
+.custom-select {
+  position: relative;
+  width: 100%;
+}
+
+.custom-select-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: white;
+  border: 2px solid var(--border-strong);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.custom-select-trigger:hover,
+.custom-select-trigger:focus-visible {
+  border-color: var(--ink);
+  box-shadow: 2px 2px 0 var(--ink);
+  outline: none;
+}
+
+.custom-select.open .custom-select-trigger {
+  border-color: var(--ink);
+  box-shadow: 2px 2px 0 var(--ink);
+}
+
+.custom-select-label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.custom-select-label.placeholder {
+  color: var(--text-dim);
+  font-weight: 400;
+}
+
+.custom-select-trigger-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  transition: transform 0.15s;
+  opacity: 0.7;
+}
+
+.custom-select.open .custom-select-trigger-chevron {
+  transform: rotate(180deg);
+  opacity: 1;
+}
+
+.custom-select-panel {
+  /* Position is set by JS (position-fixed) so it escapes the modal's
+     overflow-y:auto box and never gets clipped by the dialog. */
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: auto;
+  max-height: min(320px, 60vh);
+  overflow-y: auto;
+  background: white;
+  border: 2px solid var(--ink);
+  border-radius: 10px;
+  box-shadow: 4px 4px 0 var(--ink);
+  padding: 5px;
+  z-index: 1100;
+  display: none;
+  flex-direction: column;
+  gap: 1px;
+  transform-origin: top left;
+  animation: floating-card-menu-pop 0.14s cubic-bezier(0.2, 0.7, 0.3, 1.1);
+}
+
+.custom-select.open .custom-select-panel {
+  display: flex;
+}
+
+.custom-select-option {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+  cursor: pointer;
+  border-radius: 6px;
+  text-align: left;
+  transition: background 0.1s, color 0.1s;
+}
+
+.custom-select-option:hover:not(:disabled),
+.custom-select-option:focus-visible:not(:disabled) {
+  background: var(--surface-3, var(--surface-2));
+  outline: none;
+}
+
+.custom-select-option.selected {
+  background: var(--ink);
+  color: #fff;
+}
+
+.custom-select-option.selected .custom-select-option-icon {
+  opacity: 1;
+}
+
+.custom-select-option:disabled {
+  color: var(--text-dim);
+  cursor: default;
+  background: transparent;
+}
+
+.custom-select-option:disabled .custom-select-option-icon {
+  opacity: 0.45;
+}
+
+.custom-select-option-indent {
+  display: inline-block;
+  width: var(--depth, 0px);
+  flex-shrink: 0;
+  align-self: stretch;
+  position: relative;
+}
+
+/* Subtle vertical guide for nested rows (depth > 0) */
+.custom-select-option[data-depth="0"] .custom-select-option-indent::before { content: none; }
+.custom-select-option:not([data-depth="0"]) .custom-select-option-indent::before {
+  content: '';
+  position: absolute;
+  right: 6px;
+  top: 4px;
+  bottom: 4px;
+  width: 1.5px;
+  background: var(--border);
+  border-radius: 1px;
+}
+
+.custom-select-option-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+.custom-select-option-icon svg { width: 14px; height: 14px; }
+
+.custom-select-option-current {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.custom-select-option.selected .custom-select-option-current {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.custom-select-empty {
+  padding: 12px;
+  font-size: 12px;
+  color: var(--text-dim);
+  text-align: center;
 }
 
 .asset-info {
@@ -1671,6 +2110,10 @@ body {
 .form-select {
   appearance: none;
   cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23888' stroke-width='1.8' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  padding-right: 36px;
 }
 .form-select option {
   background: white;
@@ -1859,7 +2302,6 @@ body {
   box-shadow: 2px 2px 0 var(--ink);
 }
 
-
 .btn-primary {
   background: var(--tomato);
   color: white;
@@ -1875,6 +2317,7 @@ body {
   color: var(--ink);
   border-color: var(--border-strong);
   box-shadow: 2px 2px 0 var(--border-strong);
+  text-decoration: none !important;
 }
 .btn-ghost:hover {
   background: var(--butter);
@@ -2465,48 +2908,7 @@ body {
   margin-top: 4px;
 }
 
-/* Context menu */
-.ctx-menu {
-  position: fixed;
-  background: white;
-  border: 2px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  padding: 4px;
-  z-index: 90;
-  min-width: 160px;
-  box-shadow: 4px 4px 0 var(--border-strong);
-  display: none;
-}
-.ctx-menu.open {
-  display: block;
-}
-.ctx-menu-item {
-  padding: 8px 12px;
-  border-radius: 5px;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-muted);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  transition: all 0.1s;
-}
-.ctx-menu-item:hover {
-  background: var(--butter);
-  color: var(--ink);
-}
-.ctx-menu-item.danger {
-  color: var(--danger);
-}
-.ctx-menu-item.danger:hover {
-  background: var(--danger-bg);
-}
-.ctx-menu-sep {
-  height: 1.5px;
-  background: var(--border);
-  margin: 3px 0;
-}
+/* Sidebar right-click context menu uses .floating-card-menu — see below */
 
 /* Animations */
 @keyframes fadeIn {
@@ -2902,7 +3304,9 @@ body {
 }
 .tiptap-host .ProseMirror ul[data-type="taskList"] li {
   display: flex;
-  align-items: center;
+  /* flex-start (not center) so the checkbox stays beside the first line when
+     the task contains nested lists or multi-line content underneath. */
+  align-items: flex-start;
   gap: 8px;
   margin-bottom: 4px;
 }
@@ -2910,6 +3314,9 @@ body {
   flex-shrink: 0;
   display: flex;
   align-items: center;
+  /* Match the editor's line-height (1.75) so the centered checkbox aligns
+     with the first text line. */
+  height: 1.75em;
 }
 .tiptap-host
   .ProseMirror
@@ -2926,7 +3333,14 @@ body {
 }
 .tiptap-host .ProseMirror ul[data-type="taskList"] li > div {
   flex: 1;
-  line-height: 1.5;
+  line-height: 1.75;
+  min-width: 0;
+}
+
+/* TipTap wraps task content in a <div>; the global p margin would push the
+   text below the checkbox. Strip it for paragraphs inside that wrapper. */
+.tiptap-host .ProseMirror ul[data-type="taskList"] li > div > p {
+  margin: 0;
 }
 .tiptap-host
   .ProseMirror
@@ -3749,4 +4163,385 @@ body {
 /* ── Hint bar spacing ── */
 .wysiwyg-page .tiptap-hint {
   margin-top: 25px;
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   PDF VIEWER
+   ════════════════════════════════════════════════════════════════════════════ */
+.pdf-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+}
+.pdf-viewer.open {
+  opacity: 1;
+  pointer-events: all;
+}
+.pdf-viewer-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  flex-shrink: 0;
+}
+.pdf-viewer-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 50vw;
+}
+.pdf-viewer-frame {
+  flex: 1;
+  border: none;
+  background: #525659;
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   CHILD-CARD KEBAB MENU BUTTON
+   ════════════════════════════════════════════════════════════════════════════ */
+.child-card {
+  position: relative;
+}
+.child-card-menu-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: 1.5px solid var(--border-strong);
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--ink);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 1;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s;
+  z-index: 2;
+  padding: 0;
+}
+.child-card-menu-btn:hover,
+.child-card-menu-btn.active,
+.child-card-menu-btn:focus-visible {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: white;
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   GLOBAL CARD CONTEXT MENU (fixed, positioned by JS)
+   ════════════════════════════════════════════════════════════════════════════ */
+.card-ctx-menu {
+  position: fixed;
+  background: white;
+  border: 2px solid var(--ink, #1a1a1a);
+  border-radius: 10px;
+  box-shadow: 4px 4px 0 var(--ink, #1a1a1a);
+  padding: 4px;
+  z-index: 9999;
+  min-width: 150px;
+  animation: ctx-pop 0.12s ease;
+}
+@keyframes ctx-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+.card-ctx-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: "Fredoka", sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+  text-align: left;
+  transition: background 0.1s;
+}
+.card-ctx-menu button:hover {
+  background: var(--surface-2, #f5f5f5);
+}
+.card-ctx-menu button.danger {
+  color: var(--danger, #e53e3e);
+}
+.card-ctx-menu button.danger:hover {
+  background: var(--danger-bg, #fff5f5);
+}
+.card-ctx-menu .ctx-divider {
+  height: 1px;
+  background: var(--border, #e0e0e0);
+  margin: 4px 0;
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   SETTINGS TABS
+   ════════════════════════════════════════════════════════════════════════════ */
+.settings-tabs-nav {
+  display: flex;
+  gap: 4px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0;
+  flex-shrink: 0;
+}
+.settings-tab-btn {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 10px 14px;
+  margin-bottom: -1px;
+  transition:
+    color 0.15s,
+    border-color 0.15s;
+}
+.settings-tab-btn:hover {
+  color: var(--text);
+}
+.settings-tab-btn.active {
+  color: var(--tomato);
+  border-bottom-color: var(--tomato);
+}
+.settings-tab-panel {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   SETTINGS LOADING SPINNER
+   ════════════════════════════════════════════════════════════════════════════ */
+.settings-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 48px 24px;
+  color: var(--text-dim);
+  font-size: 14px;
+  flex: 1;
+}
+.settings-spinner {
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--border);
+  border-top-color: var(--tomato);
+  border-radius: 50%;
+  animation: settings-spin 0.7s linear infinite;
+}
+@keyframes settings-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   TEMPLATES PANEL
+   ════════════════════════════════════════════════════════════════════════════ */
+.templates-panel {
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+  box-sizing: border-box;
+  overflow-y: auto;
+}
+.templates-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.templates-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.template-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+.template-item:hover {
+  border-color: var(--tomato);
+  background: var(--surface-3, #1e1e1e);
+}
+.template-item-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+.template-item-info {
+  flex: 1;
+  min-width: 0;
+}
+.template-item-name {
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.template-item-preview {
+  font-size: 11px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: "IBM Plex Mono", monospace;
+}
+.template-item-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.template-editor {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+.template-editor .form-group {
+  margin-bottom: 12px;
+}
+.template-editor .form-group:last-child {
+  margin-bottom: 0;
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   PDF ASSET CARD
+   ════════════════════════════════════════════════════════════════════════════ */
+.pdf-asset-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin-bottom: 7px;
+  transition: border-color 0.15s;
+}
+.pdf-asset-card:hover {
+  border-color: var(--tomato);
+}
+.pdf-asset-icon {
+  font-size: 28px;
+  flex-shrink: 0;
+}
+.pdf-asset-info {
+  flex: 1;
+  min-width: 0;
+}
+.pdf-asset-name {
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pdf-asset-meta {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.pdf-asset-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* ── Asset ⋮ kebab button (images, pdfs, files) ─────────────────────────────── */
+.asset-kebab-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: 1.5px solid transparent;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, border-color 0.15s;
+  padding: 0;
+  flex-shrink: 0;
+}
+.asset-kebab-btn:hover {
+  background: var(--surface-2, #f0f0f0);
+  border-color: var(--border-strong);
+}
+.asset-kebab-btn.active {
+  background: var(--ink);
+  color: white;
+  border-color: var(--ink);
+}
+
+/* ── Context menu anchor (Download link) ────────────────────────────────────── */
+.card-ctx-menu .ctx-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: "Fredoka", sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+  text-decoration: none;
+  transition: background 0.1s;
+  box-sizing: border-box;
+}
+.card-ctx-menu .ctx-link:hover {
+  background: var(--surface-2, #f5f5f5);
+}
+
+/* ── Generic file asset row ─────────────────────────────────────────────────── */
+.file-asset-row {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 7px;
 }

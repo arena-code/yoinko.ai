@@ -71,6 +71,11 @@ export interface ImageResult {
     mimeType?: string;
     revised_prompt?: string;
 }
+export interface MdTemplate {
+    id: string;
+    name: string;
+    content: string;
+}
 export interface ProjectsResponse {
     projects: Project[];
 }
@@ -99,5 +104,8 @@ export interface ErrorResponse {
 }
 export interface SuccessResponse {
     success: boolean;
+}
+export interface TemplatesResponse {
+    templates: MdTemplate[];
 }
 //# sourceMappingURL=types.d.ts.map

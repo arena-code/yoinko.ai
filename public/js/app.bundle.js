@@ -68,6 +68,13 @@ var NotasApp = (() => {
     saveProfile: (profile) => request("PUT", "/settings/profiles", profile),
     deleteProfile: (id) => request("DELETE", `/settings/profiles/${id}`),
     setActiveProfile: (id) => request("PUT", "/settings/profiles/active", { id }),
+    // ── MD Templates ───────────────────────────────────────────────────────────
+    getTemplates: () => request("GET", "/settings/templates"),
+    saveTemplate: (t) => request("PUT", "/settings/templates", t),
+    deleteTemplate: (id) => request("DELETE", `/settings/templates/${id}`),
+    // ── Move ───────────────────────────────────────────────────────────────────
+    movePage: (id, targetParentId) => request("PUT", `/pages/${id}/move`, { target_parent_id: targetParentId }),
+    moveAsset: (id, targetPageId) => request("PATCH", `/assets/${id}`, { page_id: targetPageId }),
     // ── AI ─────────────────────────────────────────────────────────────────────
     generate: (data) => request("POST", "/ai/generate", data),
     generateImg: (data) => request("POST", "/ai/image", data),
@@ -151,6 +158,11 @@ var NotasApp = (() => {
     window.openLightbox = openLightbox;
     window.copyToClipboard = copyToClipboard;
     window.deleteAsset = deleteAsset;
+    window.openAssetCardMenu = openAssetCardMenu;
+    window.openChildCardMenu = openChildCardMenu;
+    window.closeCardMenu = closeCardMenu;
+    window.closeMoveModal = closeMoveModal;
+    window.submitMove = submitMove;
     window.renamePagePrompt = renamePagePrompt;
     window.deletePageConfirm = deletePageConfirm;
     window.submitRename = submitRename;
@@ -878,9 +890,9 @@ ${nested}`;
       addInputRules() {
         return [
           new InputRule({
-            find: /^\[\]\s$/,
+            find: /^\[\s*[xX]?\s*\]\s$/,
             handler: ({ chain, range }) => {
-              chain().deleteRange(range).toggleTaskList().run();
+              chain().deleteRange(range).clearNodes().toggleTaskList().run();
             }
           })
         ];
@@ -914,7 +926,21 @@ ${nested}`;
       content: initialHtml,
       autofocus: true,
       editorProps: {
-        attributes: { class: "tiptap-content", spellcheck: "true" }
+        attributes: { class: "tiptap-content", spellcheck: "true" },
+        // Copy/cut → write markdown to the clipboard's text/plain MIME type so
+        // pasting outside the editor (chat, terminal, another app) lands as
+        // proper Markdown instead of unstyled plain text. text/html still
+        // carries the rich representation, so paste-back into TipTap (or
+        // another rich editor) keeps full formatting.
+        clipboardTextSerializer: (slice) => {
+          const json = slice.content.toJSON();
+          if (!json || !json.length) return "";
+          const allInline = json.every(
+            (n) => n.type === "text" || n.type === "hardBreak"
+          );
+          const content = allInline ? [{ type: "paragraph", content: json }] : json;
+          return tiptapToMarkdown({ type: "doc", content }).replace(/\n+$/, "");
+        }
       },
       onUpdate({ editor: editor2 }) {
         const md = tiptapToMarkdown(editor2.getJSON());
@@ -1284,6 +1310,7 @@ ${nested}`;
                 </div>
                 <div class="child-card-name">${esc(childName)}</div>
                 <div class="child-card-meta">${child.type === "folder" ? `${state.pages.filter((p) => p.parent_id === child.id).length + (child.asset_count || 0)} items` : ext.toUpperCase() || "MD"}</div>
+                <button class="child-card-menu-btn" onclick="openChildCardMenu('${child.id}', event)" title="Actions" aria-label="Actions">\u22EF</button>
               </div>
             `;
     }).join("")}
@@ -1312,44 +1339,215 @@ ${nested}`;
         <div class="section-heading">Images &amp; Media \xB7 ${imgs.length}</div>
         <div class="asset-grid">
           ${imgs.map((a) => `
-            <div class="asset-card">
+            <div class="asset-card" onclick="openLightbox('${api.assetUrl(a.id)}','${esc(a.original_name)}')">
               <div class="asset-preview">
                 <img src="${api.assetUrl(a.id)}" alt="${esc(a.original_name)}" loading="lazy">
-                <div class="asset-overlay">
-                  <button class="asset-overlay-btn" onclick="openLightbox('${api.assetUrl(a.id)}','${esc(a.original_name)}')" title="View">\u{1F441}</button>
-                  <button class="asset-overlay-btn" onclick="copyToClipboard('${api.assetUrl(a.id)}')" title="Copy URL">\u{1F4CB}</button>
-                  <button class="asset-overlay-btn" onclick="deleteAsset('${a.id}')" title="Delete" style="color:var(--danger)">\u{1F5D1}</button>
-                </div>
               </div>
               <div class="asset-info">
                 <div class="asset-name">${esc(a.original_name)}</div>
                 <div class="asset-type">${(a.size / 1024).toFixed(1)} KB</div>
               </div>
+              <button class="asset-menu-btn" onclick="openAssetCardMenu('${a.id}', event)" title="Actions" aria-label="Actions">\u22EF</button>
             </div>
           `).join("")}
         </div>
       ` : ""}
       ${files.length ? `
         <div class="section-heading" style="margin-top:${imgs.length ? "24px" : 0}">Files \xB7 ${files.length}</div>
-        ${files.map((a) => {
-      const ext = a.original_name.split(".").pop()?.toUpperCase() || "";
+        <div class="file-asset-grid">
+          ${files.map((a) => {
+      const ext = (a.original_name.split(".").pop() || "").toUpperCase().slice(0, 4);
+      const sizeKb = a.size / 1024;
+      const sizeLabel = sizeKb >= 1024 ? `${(sizeKb / 1024).toFixed(1)} MB` : `${sizeKb.toFixed(1)} KB`;
       return `
-            <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);padding:12px 16px;display:flex;align-items:center;gap:12px;margin-bottom:7px;">
-              <div style="font-size:24px;flex-shrink:0">\u{1F4C4}</div>
-              <div style="flex:1;min-width:0">
-                <div style="font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.original_name)}</div>
-                <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text-dim)">${ext} \xB7 ${(a.size / 1024).toFixed(1)} KB</div>
+            <div class="file-asset-card" data-ext="${ext.toLowerCase()}" onclick="window.open('${api.assetUrl(a.id)}','_blank')">
+              <div class="file-asset-icon"><span class="file-asset-ext">${ext || "FILE"}</span></div>
+              <div class="file-asset-info">
+                <div class="file-asset-name">${esc(a.original_name)}</div>
+                <div class="file-asset-meta">${sizeLabel}</div>
               </div>
-              <div style="display:flex;gap:6px">
-                <a href="${api.assetUrl(a.id)}" download="${esc(a.original_name)}" class="btn btn-ghost btn-sm">\u2193 Download</a>
-                <button class="btn btn-danger btn-sm" onclick="deleteAsset('${a.id}')">Delete</button>
-              </div>
+              <button class="asset-menu-btn asset-menu-btn--inline" onclick="openAssetCardMenu('${a.id}', event)" title="Actions" aria-label="Actions">\u22EF</button>
             </div>
           `;
     }).join("")}
+        </div>
       ` : ""}
     </div>
   `;
+  }
+  var SVG_ATTRS = 'xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+  var ICON = {
+    externalLink: `<svg ${SVG_ATTRS}><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>`,
+    download: `<svg ${SVG_ATTRS}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>`,
+    copy: `<svg ${SVG_ATTRS}><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>`,
+    trash: `<svg ${SVG_ATTRS}><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>`,
+    pencil: `<svg ${SVG_ATTRS}><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>`,
+    arrowRight: `<svg ${SVG_ATTRS}><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>`,
+    folderMove: `<svg ${SVG_ATTRS}><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="9" y1="14" x2="15" y2="14"/><polyline points="12 11 15 14 12 17"/></svg>`,
+    plus: `<svg ${SVG_ATTRS}><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></svg>`,
+    fileText: `<svg ${SVG_ATTRS}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>`,
+    folder: `<svg ${SVG_ATTRS}><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`,
+    chevronRight: `<svg ${SVG_ATTRS}><polyline points="9 18 15 12 9 6"/></svg>`,
+    chevronDown: `<svg ${SVG_ATTRS}><polyline points="6 9 12 15 18 9"/></svg>`
+  };
+  var _activeMenuTrigger = null;
+  var _hoverSubmenuTimer = null;
+  function renderMenuItems(items) {
+    return items.map((it, i) => {
+      const cls = `floating-card-menu-item${it.danger ? " danger" : ""}${it.submenu ? " has-submenu" : ""}`;
+      const icon = `<span class="floating-card-menu-icon" aria-hidden="true">${it.icon || ""}</span>`;
+      const label = `<span class="floating-card-menu-label">${esc(it.label)}</span>`;
+      const arrow = it.submenu ? `<span class="floating-card-menu-chevron" aria-hidden="true">${ICON.chevronRight}</span>` : "";
+      if (it.href) {
+        const tgt = it.target ? ` target="${it.target}" rel="noopener"` : "";
+        const dl = it.download ? ` download="${esc(it.download)}"` : "";
+        return `<a class="${cls}" href="${it.href}"${tgt}${dl} data-idx="${i}">${icon}${label}${arrow}</a>`;
+      }
+      return `<button class="${cls}" data-idx="${i}" type="button">${icon}${label}${arrow}</button>`;
+    }).join("");
+  }
+  function positionFloatingMenu(menu, anchor, opts = {}) {
+    const margin = 8;
+    const gap = 6;
+    const menuRect = menu.getBoundingClientRect();
+    let left;
+    let top;
+    if (anchor instanceof HTMLElement) {
+      const r = anchor.getBoundingClientRect();
+      if (opts.preferRight) {
+        left = r.right + 4;
+        if (left + menuRect.width > window.innerWidth - margin) {
+          left = r.left - menuRect.width - 4;
+        }
+        top = r.top;
+        if (top + menuRect.height > window.innerHeight - margin) {
+          top = window.innerHeight - menuRect.height - margin;
+        }
+      } else {
+        left = r.left;
+        top = r.bottom + gap;
+        if (top + menuRect.height > window.innerHeight - margin) {
+          const aboveTop = r.top - menuRect.height - gap;
+          if (aboveTop >= margin) top = aboveTop;
+        }
+      }
+    } else {
+      left = anchor.x;
+      top = anchor.y;
+      if (top + menuRect.height > window.innerHeight - margin) {
+        top = window.innerHeight - menuRect.height - margin;
+      }
+    }
+    if (left + menuRect.width > window.innerWidth - margin) {
+      left = window.innerWidth - menuRect.width - margin;
+    }
+    if (left < margin) left = margin;
+    if (top < margin) top = margin;
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+  }
+  function attachItemHandlers(menu, items, isSubmenu) {
+    menu.querySelectorAll("[data-idx]").forEach((el) => {
+      const idx = Number(el.dataset.idx);
+      const item = items[idx];
+      if (!item) return;
+      if (item.submenu) {
+        const openIt = () => openSubmenu(el, item.submenu);
+        el.addEventListener("mouseenter", () => {
+          if (_hoverSubmenuTimer) clearTimeout(_hoverSubmenuTimer);
+          _hoverSubmenuTimer = setTimeout(openIt, 80);
+        });
+        el.addEventListener("mouseleave", () => {
+          if (_hoverSubmenuTimer) {
+            clearTimeout(_hoverSubmenuTimer);
+            _hoverSubmenuTimer = null;
+          }
+        });
+        el.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          openIt();
+        });
+      } else {
+        el.addEventListener("click", () => {
+          closeCardMenu();
+          item.onClick?.();
+        });
+        if (!isSubmenu) {
+          el.addEventListener("mouseenter", () => closeSubmenu());
+        }
+      }
+    });
+  }
+  function openCardMenu(anchor, items) {
+    const menu = $("floating-card-menu");
+    if (!menu) return;
+    const anchorEl = anchor instanceof HTMLElement ? anchor : null;
+    if (anchorEl && _activeMenuTrigger === anchorEl) {
+      closeCardMenu();
+      return;
+    }
+    closeCardMenu();
+    menu.innerHTML = renderMenuItems(items);
+    attachItemHandlers(menu, items, false);
+    if (anchorEl) {
+      anchorEl.classList.add("active");
+      _activeMenuTrigger = anchorEl;
+    }
+    menu.classList.add("open");
+    positionFloatingMenu(menu, anchor);
+  }
+  function openSubmenu(parentItem, items) {
+    const sub = $("floating-card-submenu");
+    if (!sub) return;
+    const menu = $("floating-card-menu");
+    menu?.querySelectorAll(".floating-card-menu-item.has-submenu.submenu-open").forEach((el) => el.classList.remove("submenu-open"));
+    parentItem.classList.add("submenu-open");
+    sub.innerHTML = renderMenuItems(items);
+    attachItemHandlers(sub, items, true);
+    sub.classList.add("open");
+    positionFloatingMenu(sub, parentItem, { preferRight: true });
+  }
+  function closeSubmenu() {
+    $("floating-card-submenu")?.classList.remove("open");
+    if (_hoverSubmenuTimer) {
+      clearTimeout(_hoverSubmenuTimer);
+      _hoverSubmenuTimer = null;
+    }
+    document.querySelectorAll(".floating-card-menu-item.submenu-open").forEach((el) => el.classList.remove("submenu-open"));
+  }
+  function closeCardMenu() {
+    closeSubmenu();
+    $("floating-card-menu")?.classList.remove("open");
+    if (_activeMenuTrigger) {
+      _activeMenuTrigger.classList.remove("active");
+      _activeMenuTrigger = null;
+    }
+  }
+  function openAssetCardMenu(assetId, ev) {
+    ev.stopPropagation();
+    const a = state.currentPage?.assets?.find((x) => x.id === assetId);
+    if (!a) return;
+    const url = api.assetUrl(a.id);
+    openCardMenu(ev.currentTarget, [
+      { label: "Open in new tab", icon: ICON.externalLink, href: url, target: "_blank" },
+      { label: "Download", icon: ICON.download, href: url, download: a.original_name },
+      { label: "Copy URL", icon: ICON.copy, onClick: () => copyToClipboard(url) },
+      { label: "Move to\u2026", icon: ICON.folderMove, onClick: () => openMoveModal("asset", a.id) },
+      { label: "Delete", icon: ICON.trash, danger: true, onClick: () => deleteAsset(a.id) }
+    ]);
+  }
+  function openChildCardMenu(pageId, ev) {
+    ev.stopPropagation();
+    const c = state.pages.find((p) => p.id === pageId);
+    if (!c) return;
+    const name = c.display_name || c.name;
+    openCardMenu(ev.currentTarget, [
+      { label: "Open", icon: ICON.arrowRight, onClick: () => navigateTo(c.id) },
+      { label: "Rename", icon: ICON.pencil, onClick: () => renamePagePrompt(c.id, name) },
+      { label: "Move to\u2026", icon: ICON.folderMove, onClick: () => openMoveModal("page", c.id) },
+      { label: "Delete", icon: ICON.trash, danger: true, onClick: () => deletePageConfirm(c.id, name) }
+    ]);
   }
   function renderUploadZone(pageId) {
     return `
@@ -1700,12 +1898,27 @@ ${nested}`;
     const newName = $("rename-input").value.trim();
     if (!newName) return;
     $("rename-overlay").classList.remove("open");
+    const oldId = _renameId;
+    const oldRenamedPath = state.pages.find((p) => p.id === oldId)?.path ?? "";
+    const viewedOldPath = state.currentPage?.path ?? "";
     try {
-      await api.updatePage(_renameId, { name: newName });
+      const res = await api.updatePage(oldId, { name: newName });
+      const newId = res.page.id;
+      const newRenamedPath = res.page.path;
       await loadPages();
-      if (state.currentPageId === _renameId && state.currentPage) {
-        state.currentPage.display_name = newName;
-        $("page-title").value = newName;
+      let targetId = null;
+      if (state.currentPageId === oldId) {
+        targetId = newId;
+      } else if (oldRenamedPath && newRenamedPath && viewedOldPath && viewedOldPath.startsWith(oldRenamedPath + "/")) {
+        const remapped = newRenamedPath + viewedOldPath.slice(oldRenamedPath.length);
+        const target = state.pages.find((p) => p.path === remapped);
+        if (target) targetId = target.id;
+      }
+      if (targetId) {
+        state.currentPageId = null;
+        await navigateTo(targetId);
+      } else if (state.currentPageId && state.pages.find((p) => p.id === state.currentPageId)) {
+        await renderPage(state.currentPageId);
       }
       showToast("Renamed!");
     } catch (err) {
@@ -1716,6 +1929,208 @@ ${nested}`;
     _deleteId = id;
     $("delete-page-name").textContent = `"${name}"`;
     $("delete-overlay").classList.add("open");
+  }
+  var _moveTarget = null;
+  var _moveSelection = null;
+  function buildFolderOptionsTree(blockedIds) {
+    const folders = state.pages.filter((p) => p.type === "folder" && !blockedIds.has(p.id));
+    const byParent = /* @__PURE__ */ new Map();
+    for (const f of folders) {
+      const key = f.parent_id ?? null;
+      const list = byParent.get(key) ?? [];
+      list.push(f);
+      byParent.set(key, list);
+    }
+    for (const list of byParent.values()) {
+      list.sort((a, b) => (a.display_name || a.name).localeCompare(b.display_name || b.name));
+    }
+    const out = [];
+    const walk = (parentId, prefix, depth) => {
+      const list = byParent.get(parentId) ?? [];
+      for (const f of list) {
+        const name = f.display_name || f.name;
+        const fullPath = prefix ? `${prefix} / ${name}` : name;
+        out.push({ id: f.id, shortLabel: name, fullLabel: fullPath, depth });
+        walk(f.id, fullPath, depth + 1);
+      }
+    };
+    walk(null, "", 0);
+    return out;
+  }
+  function renderMovePanel(options) {
+    const panel = $("move-target-panel");
+    if (!panel) return;
+    if (!options.length) {
+      panel.innerHTML = `<div class="custom-select-empty">No folders available</div>`;
+      return;
+    }
+    panel.innerHTML = options.map((opt, i) => {
+      const indent = `<span class="custom-select-option-indent" style="--depth:${opt.depth * 14}px"></span>`;
+      const icon = `<span class="custom-select-option-icon" aria-hidden="true">${ICON.folder}</span>`;
+      const badge = opt.isCurrent ? `<span class="custom-select-option-current">current</span>` : "";
+      const disabled = opt.isCurrent ? "disabled" : "";
+      return `<button type="button" class="custom-select-option" data-value="${esc(opt.value)}" data-label="${esc(opt.fullLabel)}" data-idx="${i}" data-depth="${opt.depth}" ${disabled}>${indent}${icon}<span class="custom-select-label">${esc(opt.shortLabel)}</span>${badge}</button>`;
+    }).join("");
+    panel.querySelectorAll(".custom-select-option").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (btn.disabled) return;
+        const value = btn.dataset.value || "";
+        const label = btn.dataset.label || "";
+        _moveSelection = { value, label };
+        const labelEl = $("move-target-label");
+        labelEl.textContent = label;
+        labelEl.classList.remove("placeholder");
+        panel.querySelectorAll(".custom-select-option.selected").forEach((el) => el.classList.remove("selected"));
+        btn.classList.add("selected");
+        closeMoveTargetPanel();
+      });
+    });
+  }
+  function positionMoveTargetPanel() {
+    const wrapper = $("move-target-select");
+    if (!wrapper.classList.contains("open")) return;
+    const trigger = $("move-target-trigger");
+    const panel = $("move-target-panel");
+    panel.style.top = "0px";
+    panel.style.left = "0px";
+    panel.style.width = `${trigger.getBoundingClientRect().width}px`;
+    const tRect = trigger.getBoundingClientRect();
+    const pRect = panel.getBoundingClientRect();
+    const margin = 8;
+    const gap = 6;
+    let top = tRect.bottom + gap;
+    if (top + pRect.height > window.innerHeight - margin) {
+      const aboveTop = tRect.top - pRect.height - gap;
+      if (aboveTop >= margin) top = aboveTop;
+      else top = window.innerHeight - pRect.height - margin;
+    }
+    let left = tRect.left;
+    if (left + pRect.width > window.innerWidth - margin) {
+      left = window.innerWidth - pRect.width - margin;
+    }
+    if (left < margin) left = margin;
+    if (top < margin) top = margin;
+    panel.style.top = `${top}px`;
+    panel.style.left = `${left}px`;
+  }
+  function closeMoveTargetPanel() {
+    $("move-target-select")?.classList.remove("open");
+  }
+  function openMoveModal(kind, id) {
+    closeCardMenu();
+    const hint = $("move-item-hint");
+    const labelEl = $("move-target-label");
+    $("move-target-select").classList.remove("open");
+    _moveSelection = null;
+    labelEl.textContent = "\u2014 Pick a folder \u2014";
+    labelEl.classList.add("placeholder");
+    const options = [];
+    if (kind === "page") {
+      const p = state.pages.find((x) => x.id === id);
+      if (!p) return;
+      const itemName = p.display_name || p.name;
+      const currentParentId = p.parent_id ?? null;
+      const blocked = /* @__PURE__ */ new Set([id]);
+      const collect = (parentId) => {
+        state.pages.forEach((c) => {
+          if (c.parent_id === parentId && !blocked.has(c.id)) {
+            blocked.add(c.id);
+            if (c.type === "folder") collect(c.id);
+          }
+        });
+      };
+      collect(id);
+      options.push({
+        value: "",
+        shortLabel: "Root level",
+        fullLabel: "Root level",
+        depth: 0,
+        isCurrent: currentParentId === null
+      });
+      for (const f of buildFolderOptionsTree(blocked)) {
+        options.push({
+          value: f.id,
+          shortLabel: f.shortLabel,
+          fullLabel: f.fullLabel,
+          depth: f.depth,
+          isCurrent: f.id === currentParentId
+        });
+      }
+      hint.textContent = `Moving "${itemName}" to a different folder.`;
+      _moveTarget = { kind: "page", id, name: itemName, currentParentId };
+    } else {
+      const a = state.currentPage?.assets?.find((x) => x.id === id);
+      if (!a) return;
+      const itemName = a.original_name;
+      const currentPageId = a.page_id ?? null;
+      for (const f of buildFolderOptionsTree(/* @__PURE__ */ new Set())) {
+        options.push({
+          value: f.id,
+          shortLabel: f.shortLabel,
+          fullLabel: f.fullLabel,
+          depth: f.depth,
+          isCurrent: f.id === currentPageId
+        });
+      }
+      hint.textContent = `Moving "${itemName}" to a different folder.`;
+      _moveTarget = { kind: "asset", id, name: itemName, currentPageId };
+    }
+    renderMovePanel(options);
+    $("move-item-overlay").classList.add("open");
+  }
+  function closeMoveModal() {
+    $("move-item-overlay").classList.remove("open");
+    $("move-target-select").classList.remove("open");
+    _moveTarget = null;
+    _moveSelection = null;
+  }
+  async function submitMove() {
+    const t = _moveTarget;
+    if (!t) return;
+    if (!_moveSelection) {
+      showToast("Pick a destination", "error");
+      return;
+    }
+    const targetValue = _moveSelection.value;
+    const oldMovedPath = t.kind === "page" ? state.pages.find((p) => p.id === t.id)?.path ?? "" : "";
+    const viewedOldPath = state.currentPage?.path ?? "";
+    closeMoveModal();
+    try {
+      let newMovedPath = "";
+      if (t.kind === "page") {
+        const res = await api.movePage(t.id, targetValue || null);
+        newMovedPath = res.page.path;
+      } else {
+        if (!targetValue) {
+          showToast("Pick a destination", "error");
+          return;
+        }
+        await api.moveAsset(t.id, targetValue);
+      }
+      await loadPages();
+      let targetId = null;
+      if (t.kind === "page") {
+        if (state.currentPageId === t.id) {
+          const moved = state.pages.find((p) => p.path === newMovedPath);
+          if (moved) targetId = moved.id;
+        } else if (oldMovedPath && newMovedPath && viewedOldPath && viewedOldPath.startsWith(oldMovedPath + "/")) {
+          const remapped = newMovedPath + viewedOldPath.slice(oldMovedPath.length);
+          const target = state.pages.find((p) => p.path === remapped);
+          if (target) targetId = target.id;
+        }
+      }
+      if (targetId) {
+        state.currentPageId = null;
+        await navigateTo(targetId);
+      } else if (state.currentPageId && state.pages.find((p) => p.id === state.currentPageId)) {
+        await renderPage(state.currentPageId);
+      } else if (state.currentPageId) {
+        showWelcome();
+      }
+      showToast("Moved!");
+    } catch (err) {
+      showToast("Move failed: " + err.message, "error");
+    }
   }
   async function submitDelete() {
     $("delete-overlay").classList.remove("open");
@@ -1731,27 +2146,33 @@ ${nested}`;
       await loadPages();
     }
   }
-  var ctxMenu = document.createElement("div");
-  ctxMenu.className = "ctx-menu";
-  ctxMenu.id = "ctx-menu";
-  document.body.appendChild(ctxMenu);
   function showCtxMenu(e, page) {
     e.preventDefault();
+    e.stopPropagation();
+    const me = e;
     const displayName = page.display_name || page.name;
-    ctxMenu.innerHTML = `
-    <div class="ctx-menu-item" onclick="renamePagePrompt('${page.id}','${esc(displayName)}')">\u270F\uFE0F Rename</div>
-    ${page.type === "folder" ? `
-      <div class="ctx-menu-item" onclick="openNewPageModal('page','${page.id}')">\u{1F4C4} Add Page Inside</div>
-      <div class="ctx-menu-item" onclick="openNewPageModal('folder','${page.id}')">\u{1F4C1} Add Folder Inside</div>
-    ` : ""}
-    <div class="ctx-menu-sep"></div>
-    <div class="ctx-menu-item danger" onclick="deletePageConfirm('${page.id}','${esc(displayName)}')">\u{1F5D1} Delete</div>
-  `;
-    ctxMenu.style.left = `${Math.min(e.clientX, window.innerWidth - 180)}px`;
-    ctxMenu.style.top = `${Math.min(e.clientY, window.innerHeight - 120)}px`;
-    ctxMenu.classList.add("open");
+    const items = [];
+    if (page.type === "page") {
+      items.push({ label: "Open", icon: ICON.arrowRight, onClick: () => navigateTo(page.id) });
+    }
+    items.push({ label: "Rename", icon: ICON.pencil, onClick: () => renamePagePrompt(page.id, displayName) });
+    if (page.type === "folder") {
+      items.push({
+        label: "Add\u2026",
+        icon: ICON.plus,
+        submenu: [
+          { label: "Page", icon: ICON.fileText, onClick: () => openNewPageModal("page", page.id) },
+          { label: "Folder", icon: ICON.folder, onClick: () => openNewPageModal("folder", page.id) }
+        ]
+      });
+    }
+    const isMovable = page.type === "page" || page.type === "folder" && !!page.parent_id;
+    if (isMovable) {
+      items.push({ label: "Move to\u2026", icon: ICON.folderMove, onClick: () => openMoveModal("page", page.id) });
+    }
+    items.push({ label: "Delete", icon: ICON.trash, danger: true, onClick: () => deletePageConfirm(page.id, displayName) });
+    openCardMenu({ x: me.clientX, y: me.clientY }, items);
   }
-  document.addEventListener("click", () => ctxMenu.classList.remove("open"));
   var titleTimer;
   function onTitleChange(e) {
     clearTimeout(titleTimer);
@@ -2122,25 +2543,50 @@ ${nested}`;
     if (typeof marked === "undefined") return `<pre>${esc(text || "")}</pre>`;
     const result = marked.parse(text || "", { async: false, gfm: true, breaks: false });
     const html = typeof result === "string" ? result : `<pre>${esc(text || "")}</pre>`;
-    return html.replace(
-      /<ul[^>]*>([\s\S]*?)<\/ul>/g,
-      (fullMatch, inner) => {
-        if (!/<input[^>]+type="checkbox"/.test(inner)) return fullMatch;
-        const converted = inner.replace(
-          /<li>([\s\S]*?)<\/li>/g,
-          (_m, content) => {
-            const cbMatch = content.match(/<input([^>]*)type="checkbox"([^>]*)>/);
-            if (!cbMatch) return `<li>${content}</li>`;
-            const allAttrs = (cbMatch[1] || "") + (cbMatch[2] || "");
-            const isChecked = /checked/.test(allAttrs);
-            let itemHtml = content.replace(/<input[^>]+type="checkbox"[^>]*>/g, "").trim();
-            itemHtml = itemHtml.replace(/^<p>([\s\S]*?)<\/p>$/, "$1").trim();
-            return `<li data-type="taskItem" ${isChecked ? 'data-checked="true"' : 'data-checked="false"'}><label><input type="checkbox" ${isChecked ? "checked" : ""}><span>${itemHtml}</span></label></li>`;
-          }
+    const wrapper = document.createElement("div");
+    wrapper.innerHTML = html;
+    for (const ul of Array.from(wrapper.querySelectorAll("ul"))) {
+      const directLis = Array.from(ul.children).filter(
+        (c) => c.tagName === "LI"
+      );
+      if (!directLis.length) continue;
+      const isTaskList = directLis.some(
+        (li) => li.querySelector(':scope > input[type="checkbox"], :scope > p > input[type="checkbox"]')
+      );
+      if (!isTaskList) continue;
+      ul.setAttribute("data-type", "taskList");
+      for (const li of directLis) {
+        const cb = li.querySelector(
+          ':scope > input[type="checkbox"], :scope > p > input[type="checkbox"]'
         );
-        return `<ul data-type="taskList">${converted}</ul>`;
+        if (!cb) continue;
+        const isChecked = cb.hasAttribute("checked") || cb.checked;
+        let leadingHtml = "";
+        const leadingP = li.querySelector(":scope > p");
+        if (leadingP && leadingP.contains(cb)) {
+          cb.remove();
+          leadingHtml = leadingP.innerHTML.trim();
+          leadingP.remove();
+        } else {
+          cb.remove();
+          const buf = document.createElement("div");
+          for (const child of Array.from(li.childNodes)) {
+            if (child.nodeType === Node.ELEMENT_NODE) {
+              const tag = child.tagName;
+              if (tag === "UL" || tag === "OL") break;
+            }
+            buf.appendChild(child);
+          }
+          leadingHtml = buf.innerHTML.trim();
+        }
+        li.setAttribute("data-type", "taskItem");
+        li.setAttribute("data-checked", isChecked ? "true" : "false");
+        const label = document.createElement("label");
+        label.innerHTML = `<input type="checkbox"${isChecked ? " checked" : ""}><span>${leadingHtml}</span>`;
+        li.insertBefore(label, li.firstChild);
       }
-    );
+    }
+    return wrapper.innerHTML;
   }
   function esc(str) {
     if (!str) return "";
@@ -2169,6 +2615,15 @@ ${nested}`;
         state.chatOpen = false;
         $("chat-drawer").classList.remove("open");
       }
+      const target = e.target;
+      if (!target.closest("#floating-card-menu") && !target.closest(".asset-menu-btn") && !target.closest(".child-card-menu-btn")) {
+        closeCardMenu();
+      }
+    });
+    window.addEventListener("scroll", closeCardMenu, true);
+    window.addEventListener("resize", closeCardMenu);
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && _activeMenuTrigger) closeCardMenu();
     });
     $("confirm-delete-cancel").addEventListener("click", () => closeConfirmDelete(false));
     $("confirm-delete-ok").addEventListener("click", () => closeConfirmDelete(true));
@@ -2184,6 +2639,27 @@ ${nested}`;
     $("lightbox").addEventListener("click", (e) => {
       if (e.target === $("lightbox")) closeLightbox();
     });
+    $("move-item-overlay").addEventListener("click", (e) => {
+      if (e.target === $("move-item-overlay")) closeMoveModal();
+    });
+    $("move-target-trigger").addEventListener("click", (e) => {
+      e.stopPropagation();
+      const wrapper = $("move-target-select");
+      const wasOpen = wrapper.classList.contains("open");
+      wrapper.classList.toggle("open");
+      if (!wasOpen) positionMoveTargetPanel();
+    });
+    document.addEventListener("click", (e) => {
+      const wrapper = $("move-target-select");
+      const panel = $("move-target-panel");
+      if (!wrapper) return;
+      const target = e.target;
+      if (!wrapper.contains(target) && !panel.contains(target)) {
+        wrapper.classList.remove("open");
+      }
+    });
+    window.addEventListener("resize", () => positionMoveTargetPanel());
+    window.addEventListener("scroll", () => positionMoveTargetPanel(), true);
     $("create-project-overlay").addEventListener("click", (e) => {
       if (e.target === $("create-project-overlay")) closeCreateProjectModal();
     });

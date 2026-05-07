@@ -25,6 +25,12 @@ const JWKS = SUPABASE_URL
 // ── Tenant cache (avoids Supabase REST call on every request) ─────────────────
 const tenantCache = new Map();
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+// Invalidate a single user's cached tenant. Called by the admin endpoint when
+// the website removes a member or revokes access — gives immediate revocation
+// instead of waiting for the 5-minute TTL.
+export function invalidateTenantCache(userId) {
+    return tenantCache.delete(userId);
+}
 // Routes that should NOT require auth
 const PUBLIC_PATHS = ['/api/health'];
 function extractToken(req) {
@@ -160,41 +166,63 @@ async function refreshAccessToken(refreshToken) {
         return null;
     }
 }
+function makeTenantInfo(subdomain, status) {
+    return {
+        subdomain,
+        status,
+        dataDir: path.join(CLOUD_DATA_ROOT, subdomain),
+    };
+}
 async function lookupTenant(userId) {
     // Check cache first
     const cached = tenantCache.get(userId);
     if (cached && cached.expiresAt > Date.now()) {
         return cached.tenant;
     }
-    // Fetch from Supabase REST API
     if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
         console.error('[cloud-auth] SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not set');
         return null;
     }
+    const headers = {
+        'apikey': SUPABASE_SERVICE_KEY,
+        'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
+    };
     try {
-        const url = `${SUPABASE_URL}/rest/v1/tenants?user_id=eq.${userId}&select=subdomain,status&limit=1`;
-        const res = await fetch(url, {
-            headers: {
-                'apikey': SUPABASE_SERVICE_KEY,
-                'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
-            },
-        });
-        if (!res.ok) {
-            console.error(`[cloud-auth] Supabase lookup failed: ${res.status}`);
+        // 1. Owned tenant (most common path)
+        const ownedRes = await fetch(`${SUPABASE_URL}/rest/v1/tenants?user_id=eq.${userId}&select=subdomain,status&limit=1`, { headers });
+        if (!ownedRes.ok) {
+            console.error(`[cloud-auth] Tenants lookup failed: ${ownedRes.status}`);
             return null;
         }
-        const rows = await res.json();
-        if (!rows.length)
+        const ownedRows = await ownedRes.json();
+        if (ownedRows.length && ownedRows[0].status === 'active') {
+            const tenant = makeTenantInfo(ownedRows[0].subdomain, ownedRows[0].status);
+            tenantCache.set(userId, { tenant, expiresAt: Date.now() + CACHE_TTL_MS });
+            return tenant;
+        }
+        // 2. Member tenant (Cloud Crew teammate)
+        const memberRes = await fetch(`${SUPABASE_URL}/rest/v1/tenant_members?user_id=eq.${userId}&select=tenant_id&limit=1`, { headers });
+        if (!memberRes.ok) {
+            // 404 here likely means the migration hasn't been applied yet — treat as no membership
+            if (memberRes.status !== 404) {
+                console.error(`[cloud-auth] Members lookup failed: ${memberRes.status}`);
+            }
             return null;
-        const row = rows[0];
-        if (row.status !== 'active')
+        }
+        const memberRows = await memberRes.json();
+        if (!memberRows.length)
             return null;
-        const tenant = {
-            subdomain: row.subdomain,
-            status: row.status,
-            dataDir: path.join(CLOUD_DATA_ROOT, row.subdomain),
-        };
-        // Cache it
+        const memberTenantId = memberRows[0].tenant_id;
+        const memberTenantRes = await fetch(`${SUPABASE_URL}/rest/v1/tenants?id=eq.${memberTenantId}&select=subdomain,status&limit=1`, { headers });
+        if (!memberTenantRes.ok) {
+            console.error(`[cloud-auth] Member tenant lookup failed: ${memberTenantRes.status}`);
+            return null;
+        }
+        const memberTenantRows = await memberTenantRes.json();
+        if (!memberTenantRows.length || memberTenantRows[0].status !== 'active') {
+            return null;
+        }
+        const tenant = makeTenantInfo(memberTenantRows[0].subdomain, memberTenantRows[0].status);
         tenantCache.set(userId, { tenant, expiresAt: Date.now() + CACHE_TTL_MS });
         return tenant;
     }

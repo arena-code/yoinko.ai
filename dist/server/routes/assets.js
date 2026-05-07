@@ -122,6 +122,18 @@ router.get('/:id/file', async (req, res) => {
         res.status(500).send(err.message);
     }
 });
+// ── PATCH /api/assets/:id — update page_id (move asset to another page) ──────
+router.patch('/:id', (req, res) => {
+    try {
+        const db = getProjectDb(projectId(req), dataDir(req));
+        const { page_id } = req.body;
+        db.prepare(`UPDATE assets SET page_id = ? WHERE id = ?`).run(page_id ?? null, req.params.id);
+        res.json({ success: true });
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
 // ── DELETE /api/assets/:id ────────────────────────────────────────────────────
 router.delete('/:id', (req, res) => {
     try {

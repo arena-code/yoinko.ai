@@ -168,6 +168,56 @@ router.put('/profiles/active', (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+// ── GET /api/settings/templates — list all MD templates ──────────────────────
+router.get('/templates', (req, res) => {
+    try {
+        const db = getGlobalDb(dataDir(req));
+        const raw = getSettingValue(db, 'md_templates');
+        const templates = raw ? JSON.parse(raw) : [];
+        res.json({ templates });
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+// ── PUT /api/settings/templates — create or update a template ────────────────
+router.put('/templates', (req, res) => {
+    try {
+        const db = getGlobalDb(dataDir(req));
+        const incoming = req.body;
+        if (!incoming.id || !incoming.name) {
+            return void res.status(400).json({ error: 'id and name are required' });
+        }
+        const raw = getSettingValue(db, 'md_templates');
+        const templates = raw ? JSON.parse(raw) : [];
+        const idx = templates.findIndex(t => t.id === incoming.id);
+        if (idx >= 0) {
+            templates[idx] = incoming;
+        }
+        else {
+            templates.push(incoming);
+        }
+        upsertSetting(db, 'md_templates', JSON.stringify(templates));
+        res.json({ success: true, template: incoming });
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+// ── DELETE /api/settings/templates/:id — delete a template ───────────────────
+router.delete('/templates/:id', (req, res) => {
+    try {
+        const db = getGlobalDb(dataDir(req));
+        const raw = getSettingValue(db, 'md_templates');
+        const templates = raw ? JSON.parse(raw) : [];
+        const filtered = templates.filter(t => t.id !== req.params.id);
+        upsertSetting(db, 'md_templates', JSON.stringify(filtered));
+        res.json({ success: true });
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
 // ── GET /api/settings/:key ────────────────────────────────────────────────────
 router.get('/:key', (req, res) => {
     try {

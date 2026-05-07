@@ -1,6 +1,7 @@
 // src/server/routes/pages.ts
 import express, { Request, Response } from 'express';
 import path from 'path';
+import fs from 'fs';
 import { getProjectDb } from '../db.js';
 import { getPagesDir } from '../files.js';
 import {
@@ -130,10 +131,12 @@ router.put('/:id', (req: Request, res: Response) => {
       const newRelPath = renamePath(pagesDir, relPath, newFileName);
       const newId = toId(newRelPath);
 
-      // If this is a folder rename (no extension), migrate asset page_ids
-      // that referenced pages inside the old folder path.
+      // If this is a folder rename (no extension), migrate asset page_ids:
+      //   Case 1: assets attached directly to the renamed folder (page_id === oldId)
+      //   Case 2: assets attached to pages/subfolders inside the renamed folder
       if (!ext) {
         const db = getProjectDb(pid, dataDir(req));
+        const oldId = toId(relPath);
         const oldPrefix = relPath + '/';   // e.g. "01 - Branding/"
         const newPrefix = newRelPath + '/'; // e.g. "Branding/"
 
@@ -146,6 +149,12 @@ router.put('/:id', (req: Request, res: Response) => {
         for (const asset of allAssets) {
           if (!asset.page_id) continue;
           try {
+            // Case 1: asset lives directly on the renamed folder
+            if (asset.page_id === oldId) {
+              updateStmt.run(newId, asset.id);
+              continue;
+            }
+            // Case 2: asset lives on a page/subfolder inside the renamed folder
             const assetPath = Buffer.from(asset.page_id, 'base64url').toString('utf8');
             if (assetPath.startsWith(oldPrefix)) {
               const updatedPath = newPrefix + assetPath.slice(oldPrefix.length);
@@ -181,6 +190,90 @@ router.delete('/:id', (req: Request, res: Response) => {
     const relPath = fromId(req.params.id as string);
     deletePath(pagesDir, relPath);
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ── PUT /api/pages/:id/move — move to different parent folder ─────────────────
+router.put('/:id/move', (req: Request, res: Response) => {
+  try {
+    const pid = projectId(req);
+    const dd = dataDir(req);
+    const pagesDir = getPagesDir(pid, dd);
+    const relPath = fromId(req.params.id as string);
+    const { target_parent_id } = req.body as { target_parent_id?: string };
+
+    // Resolve target directory (root or a specific folder)
+    let targetDir = '';
+    if (target_parent_id) {
+      targetDir = fromId(target_parent_id);
+    }
+
+    const basename = path.basename(relPath);
+    const newRelPath = targetDir ? `${targetDir}/${basename}` : basename;
+
+    if (newRelPath === relPath) {
+      return void res.json({ success: true }); // no-op
+    }
+
+    const srcAbs = path.join(pagesDir, relPath);
+    const dstAbs = path.join(pagesDir, newRelPath);
+
+    // Safety: make sure dst parent exists
+    const dstParent = path.dirname(dstAbs);
+    if (!path.resolve(dstParent).startsWith(path.resolve(pagesDir))) {
+      return void res.status(400).json({ error: 'Invalid target' });
+    }
+    if (!fs.existsSync(srcAbs)) {
+      return void res.status(404).json({ error: 'Source not found' });
+    }
+
+    fs.mkdirSync(dstParent, { recursive: true });
+    fs.renameSync(srcAbs, dstAbs);
+
+    // Migrate asset page_ids if this is a folder move
+    const isFolder = fs.statSync(dstAbs).isDirectory();
+    const db = getProjectDb(pid, dd);
+
+    if (isFolder) {
+      const oldId    = toId(relPath);        // base64url of the folder itself
+      const newId    = toId(newRelPath);
+      const oldPrefix = relPath + '/';       // sub-page prefix (with trailing slash)
+      const newPrefix = newRelPath + '/';
+
+      const allAssets = db.prepare<[], { id: string; page_id: string | null }>(
+        `SELECT id, page_id FROM assets WHERE page_id IS NOT NULL`
+      ).all();
+      const updateStmt = db.prepare(`UPDATE assets SET page_id = ? WHERE id = ?`);
+
+      for (const asset of allAssets) {
+        if (!asset.page_id) continue;
+        try {
+          // Case 1: asset lives directly on the moved folder
+          if (asset.page_id === oldId) {
+            updateStmt.run(newId, asset.id);
+            continue;
+          }
+          // Case 2: asset lives on a page/subfolder inside the moved folder
+          const assetPath = Buffer.from(asset.page_id, 'base64url').toString('utf8');
+          if (assetPath.startsWith(oldPrefix)) {
+            const updatedPath = newPrefix + assetPath.slice(oldPrefix.length);
+            updateStmt.run(Buffer.from(updatedPath).toString('base64url'), asset.id);
+          }
+        } catch { /* skip malformed */ }
+      }
+    } else {
+      // Single page moved — simple direct update
+      const oldId = toId(relPath);
+      const newId = toId(newRelPath);
+      db.prepare(`UPDATE assets SET page_id = ? WHERE page_id = ?`).run(newId, oldId);
+    }
+
+    const flat = flattenTree(scanDir(pagesDir));
+    const newId = toId(newRelPath);
+    const page = flat.find(p => p.id === newId);
+    res.json({ page: page ?? { id: newId, path: newRelPath } });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
