@@ -1185,99 +1185,6 @@ body {
   min-height: 600px;
 }
 
-/* ── Floating compose button ─────────────────────────────────── */
-.compose-btn {
-  position: fixed;
-  bottom: 32px;
-  right: 80px;
-  width: 52px;
-  height: 52px;
-  border-radius: var(--radius-pill);
-  background: var(--tomato);
-  border: 2.5px solid var(--ink);
-  color: #fff;
-  font-size: 24px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: var(--shadow-btn);
-  transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
-  z-index: 20;
-}
-.compose-btn:hover {
-  transform: translate(-2px, -2px);
-  box-shadow: 5px 5px 0 var(--ink);
-}
-.compose-btn.hidden {
-  display: none;
-}
-
-/* Compose popup */
-.compose-popup {
-  position: fixed;
-  bottom: 96px;
-  right: 72px;
-  width: 390px;
-  background: white;
-  border: 2.5px solid var(--ink);
-  border-radius: var(--radius);
-  padding: 18px;
-  box-shadow: var(--shadow-card);
-  z-index: 30;
-  display: none;
-  animation: popIn 0.2s cubic-bezier(0.34, 1.4, 0.64, 1);
-}
-.compose-popup.open {
-  display: block;
-}
-
-@keyframes popIn {
-  from {
-    opacity: 0;
-    transform: scale(0.9) translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
-}
-
-.compose-popup-title {
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--ink);
-  margin-bottom: 12px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.compose-popup-input {
-  width: 100%;
-  padding: 10px 12px;
-  background: var(--surface-2);
-  border: 2px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  color: var(--ink);
-  font-family: "Fredoka", sans-serif;
-  font-size: 14px;
-  outline: none;
-  resize: none;
-  min-height: 80px;
-  transition: border-color 0.15s;
-}
-.compose-popup-input:focus {
-  border-color: var(--tomato);
-  background: white;
-}
-
-.compose-popup-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 12px;
-}
-
 /* ══════════════════════════════════════════════════════════════
    AI CHAT DRAWER
    ══════════════════════════════════════════════════════════════ */
@@ -1799,45 +1706,104 @@ body {
 }
 .type-option-desc {
   font-size: 11px;
-  color: var(--text-dim);
+  color: var(--ink-muted);
+  font-weight: 300;
 }
 
-.ai-fill-toggle {
+.type-option.selected .type-option-desc {
+  color: var(--ink-muted);
+  font-weight: 500;
+}
+
+/* ── AI Pre-fill mascot card ─────────────────────────────────── */
+.ai-prefill-card {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   padding: 12px 14px;
-  background: var(--accent-dim);
-  border: 1.5px solid var(--border-accent);
-  border-radius: var(--radius-sm);
+  margin-top: 12px;
+  background: var(--surface-2);
+  border: 2px solid var(--tomato);
+  border-radius: var(--radius);
   cursor: pointer;
-  transition: all 0.13s;
+  transition:
+    border-color 0.2s,
+    background 0.2s,
+    box-shadow 0.2s,
+    transform 0.15s;
+  user-select: none;
 }
-.ai-fill-toggle:hover {
-  background: rgba(255, 90, 54, 0.16);
+.ai-prefill-card:hover {
+  border-color: var(--tomato);
+  border-width: 2px;
+  background: var(--accent-dim);
+  box-shadow: 0 2px 10px rgba(255, 90, 54, 0.12);
+  transform: translateY(-1px);
 }
-.ai-fill-toggle-icon {
-  font-size: 18px;
+.ai-prefill-card:hover .ai-prefill-mascot {
+  transform: scale(1.12);
 }
-.ai-fill-toggle-text {
+.ai-prefill-card.active {
+  border-color: var(--tomato);
+  background: var(--accent-dim);
+  box-shadow: 0 3px 16px rgba(255, 90, 54, 0.18);
+}
+
+.ai-prefill-card.active .ai-prefill-mascot {
+  transform: scale(1.12);
+}
+
+.ai-prefill-mascot {
+  width: 45px;
+  height: 45px;
+  object-fit: fill;
+  flex-shrink: 0;
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.ai-prefill-copy {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ai-prefill-title {
   font-size: 13px;
   font-weight: 700;
-  color: var(--tomato);
-  flex: 1;
+  color: var(--ink);
+  font-family: "Syne", sans-serif;
+}
+.ai-prefill-sub {
+  font-size: 11px;
+  color: var(--ink-muted);
 }
 
-.ai-fill-toggle-check {
-  width: 20px;
+/* Toggle pill (iOS-style) */
+.ai-prefill-toggle {
+  width: 36px;
   height: 20px;
-  border-radius: 50%;
-  border: 2px solid var(--tomato);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.13s;
+  border-radius: 10px;
+  background: var(--border);
+  flex-shrink: 0;
+  position: relative;
+  transition: background 0.2s;
 }
-.ai-fill-toggle.active .ai-fill-toggle-check {
+.ai-prefill-card.active .ai-prefill-toggle {
   background: var(--tomato);
+}
+.ai-prefill-toggle-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 0.2s cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+.ai-prefill-card.active .ai-prefill-toggle-knob {
+  transform: translateX(16px);
 }
 
 /* Modal actions */
@@ -2648,7 +2614,7 @@ body {
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--text-dim);
+  color: var(--ink);
   padding: 8px 16px;
   border-bottom: 1.5px solid var(--border);
   background: var(--surface-2);
@@ -2848,14 +2814,17 @@ body {
 
 /* ── Inline marks ── */
 .tiptap-host .ProseMirror strong {
-  font-weight: 700;
+  font-weight: 600;
 }
 .tiptap-host .ProseMirror em {
   font-style: italic;
 }
+.tiptap-host .ProseMirror p {
+  color: var(--ink);
+}
 .tiptap-host .ProseMirror s {
   text-decoration: line-through;
-  color: var(--text-dim);
+  color: var(--text-muted);
 }
 .tiptap-host .ProseMirror a {
   color: var(--tomato);
@@ -2955,7 +2924,16 @@ body {
   li[data-checked="true"]
   > div {
   text-decoration: line-through;
-  color: var(--text-dim);
+  color: var(--ink);
+}
+
+.tiptap-host
+  .ProseMirror
+  ul[data-type="taskList"]
+  li[data-checked="true"]
+  > div
+  > p {
+  color: var(--ink-muted);
 }
 
 /* ── Tables ── */

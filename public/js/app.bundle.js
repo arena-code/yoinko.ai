@@ -108,7 +108,8 @@ var NotasApp = (() => {
     chatStreaming: false,
     expandedFolders: /* @__PURE__ */ new Set(),
     settings: {},
-    wysiwyg: null
+    wysiwyg: null,
+    aiEnabled: false
   };
   var $ = (id) => document.getElementById(id);
   var $$ = (sel) => document.querySelectorAll(sel);
@@ -139,7 +140,6 @@ var NotasApp = (() => {
     window.closeSettings = closeSettings;
     window.selectProvider = selectProvider;
     window.toggleHtmlEditMode = toggleHtmlEditMode;
-    window.submitCompose = submitCompose;
     window.triggerUpload = triggerUpload;
     window.handleFileUpload = handleFileUpload;
     window.clearChat = clearChat;
@@ -159,6 +159,7 @@ var NotasApp = (() => {
     window.submitRenameProject = submitRenameProject;
     window.addNewProfile = addNewProfile;
     window.deleteCurrentProfile = deleteCurrentProfile;
+    window.confirmDeleteProfile = confirmDeleteProfile;
     window.setActiveCurrentProfile = setActiveCurrentProfile;
     window.saveCurrentProfile = saveCurrentProfile;
     window.selectProfileItem = selectProfileItem;
@@ -182,6 +183,7 @@ var NotasApp = (() => {
     };
     await loadSettings();
     applyTheme(state.theme);
+    await applyAIVisibility();
     if (localStorage.getItem("yk-sidebar-collapsed") === "1") {
       $("sidebar").classList.add("collapsed");
     }
@@ -398,6 +400,21 @@ var NotasApp = (() => {
     } catch {
     }
   }
+  async function applyAIVisibility() {
+    try {
+      const { profiles } = await api.getProfiles();
+      state.aiEnabled = profiles.length > 0;
+    } catch {
+      state.aiEnabled = false;
+    }
+    const show = state.aiEnabled;
+    const chatToggle = document.getElementById("chat-toggle");
+    if (chatToggle) chatToggle.style.display = show ? "" : "none";
+    if (!show && state.chatOpen) {
+      state.chatOpen = false;
+      document.getElementById("chat-drawer")?.classList.remove("open");
+    }
+  }
   function applyTheme(theme) {
     state.theme = theme;
     document.documentElement.setAttribute("data-theme", theme);
@@ -590,7 +607,6 @@ var NotasApp = (() => {
       const isPage = page.type === "page";
       const isMd = page.file_type === "md";
       const isHtml = isPage && page.file_type === "html";
-      $("compose-btn").classList.toggle("hidden", !isPage || !isMd);
       $("html-edit-btn").classList.toggle("hidden", !isHtml);
       if (isHtml) {
         $("html-edit-btn").textContent = "\u270F\uFE0F Edit HTML";
@@ -618,13 +634,14 @@ var NotasApp = (() => {
     function inline(nodes) {
       if (!nodes) return "";
       return nodes.map((n) => {
+        if (n.type === "hardBreak") return "  \n";
         let t = n.text || "";
         if (n.marks) {
+          if (n.marks.some((m) => m.type === "code")) return `\`${t}\``;
           n.marks.forEach((m) => {
             if (m.type === "bold") t = `**${t}**`;
             else if (m.type === "italic") t = `*${t}*`;
             else if (m.type === "strike") t = `~~${t}~~`;
-            else if (m.type === "code") t = `\`${t}\``;
             else if (m.type === "underline") t = `<u>${t}</u>`;
             else if (m.type === "link") t = `[${t}](${m.attrs?.href || ""})`;
           });
@@ -632,13 +649,20 @@ var NotasApp = (() => {
         return t;
       }).join("");
     }
-    function block(node, indent) {
-      indent = indent || "";
+    function serializeListItem(node, prefix) {
+      const c = node.content || [];
+      if (c.length === 0) return prefix + "\n";
+      const first = c[0];
+      const textLine = first.type === "paragraph" ? inline(first.content).trimEnd() : blk(first).trimEnd();
+      const nested = c.slice(1).map((n) => blk(n).replace(/^(?=.)/gm, "    ")).join("");
+      return prefix + textLine + "\n" + nested;
+    }
+    function blk(node) {
       const t = node.type;
       const c = node.content || [];
-      if (t === "doc") return c.map((n) => block(n, "")).join("\n");
-      if (t === "paragraph") return indent + (inline(c) || "") + "\n";
-      if (t === "heading") return "#".repeat(node.attrs?.level) + " " + inline(c) + "\n";
+      if (t === "doc") return c.map((n) => blk(n)).join("\n");
+      if (t === "paragraph") return inline(c) + "\n";
+      if (t === "heading") return "#".repeat(node.attrs?.level || 1) + " " + inline(c) + "\n";
       if (t === "horizontalRule") return "---\n";
       if (t === "codeBlock") {
         const lang = node.attrs?.language || "";
@@ -648,11 +672,13 @@ ${code}
 \`\`\`
 `;
       }
-      if (t === "blockquote") return c.map((n) => "> " + block(n, "").trimEnd()).join("\n") + "\n";
-      if (t === "bulletList") return c.map((n) => block(n, "- ")).join("");
+      if (t === "blockquote") {
+        return c.map((n) => blk(n).replace(/^/gm, "> ").replace(/> $/gm, ">").trimEnd()).join("\n") + "\n";
+      }
+      if (t === "bulletList") return c.map((n) => serializeListItem(n, "- ")).join("");
       if (t === "orderedList") {
         let i = node.attrs?.start || 1;
-        return c.map((n) => block(n, `${i++}. `)).join("");
+        return c.map((n) => serializeListItem(n, `${i++}. `)).join("");
       }
       if (t === "taskList") {
         return c.map((n) => {
@@ -660,30 +686,18 @@ ${code}
           const checkbox = checked ? "[x]" : "[ ]";
           const children = n.content || [];
           const first = children[0];
-          const textPart = first ? first.type === "paragraph" ? inline(first.content).trimEnd() : block(first, "").trimEnd() : "";
-          const nestedParts = children.slice(1).map(
-            (n2) => block(n2, "").replace(/^(.)/gm, "  $1")
-          ).join("");
+          const textPart = first ? first.type === "paragraph" ? inline(first.content).trimEnd() : blk(first).trimEnd() : "";
+          const nested = children.slice(1).map((n2) => blk(n2).replace(/^(?=.)/gm, "    ")).join("");
           return `- ${checkbox} ${textPart}
-${nestedParts}`;
+${nested}`;
         }).join("");
-      }
-      if (t === "listItem" || t === "taskItem") {
-        const parts = c.map((n) => {
-          if (n.type === "bulletList" || n.type === "orderedList" || n.type === "taskList") {
-            return block(n, "").replace(/^(.)/gm, "  $1");
-          }
-          return block(n, "").trimEnd();
-        });
-        return indent + parts.join("\n") + "\n";
       }
       if (t === "hardBreak") return "  \n";
       if (t === "text") return node.text || "";
       if (t === "table") {
         const rows = c.map((row, rowIdx) => {
           const cells = (row.content || []).map((cell) => {
-            const cellText = (cell.content || []).map((n) => block(n, "")).join("").replace(/\n/g, " ").trim();
-            return cellText;
+            return (cell.content || []).map((n) => blk(n)).join("").replace(/\n/g, " ").trim();
           });
           const rowStr = "| " + cells.join(" | ") + " |";
           if (rowIdx === 0) {
@@ -694,10 +708,10 @@ ${nestedParts}`;
         });
         return rows.join("\n") + "\n";
       }
-      return c.map((n) => block(n, indent)).join("");
+      return c.map((n) => blk(n)).join("");
     }
     try {
-      return block(doc, "").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+      return blk(doc).replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
     } catch {
       return "";
     }
@@ -1423,6 +1437,13 @@ ${nestedParts}`;
   var _ctxFolderId = null;
   function openNewPageModal(defaultType = "page", ctxFolderId) {
     _ctxFolderId = ctxFolderId || null;
+    if (defaultType === "image" && !state.aiEnabled) defaultType = "page";
+    const imageOption = document.getElementById("type-option-image");
+    if (imageOption) {
+      imageOption.style.opacity = state.aiEnabled ? "" : "0.4";
+      imageOption.style.pointerEvents = state.aiEnabled ? "" : "none";
+      imageOption.title = state.aiEnabled ? "" : "Configure an AI profile first";
+    }
     $("new-page-overlay").classList.add("open");
     $("new-page-type").value = defaultType;
     updateTypeOptions(defaultType);
@@ -1458,9 +1479,16 @@ ${nestedParts}`;
     const isImage = type === "image";
     $("new-page-file-type-row").style.display = isFolder || isImage ? "none" : "";
     $("new-page-parent-row").style.display = isFolder || isImage ? "none" : "";
-    $("new-page-ai-prefill-row").style.display = isImage ? "none" : "";
     $("new-page-ai-section").style.display = "none";
     $("new-page-image-section").style.display = isImage ? "" : "none";
+    const showPrefill = !isFolder && !isImage && state.aiEnabled;
+    $("new-page-ai-prefill-row").style.display = showPrefill ? "" : "none";
+    if (!showPrefill) $("new-page-ai-section").style.display = "none";
+    const card = $("new-page-ai-prefill-row");
+    if (card) {
+      card.classList.remove("active");
+      card.dataset.active = "false";
+    }
     const nameInput = $("new-page-name");
     const nameLabel = nameInput.previousElementSibling;
     if (isImage) {
@@ -1483,9 +1511,22 @@ ${nestedParts}`;
   }
   function toggleAiFill() {
     const section = $("new-page-ai-section");
-    const isHidden = section.style.display === "none" || !section.style.display;
-    section.style.display = isHidden ? "" : "none";
-    if (isHidden) $("new-page-ai-prompt").focus();
+    const card = $("new-page-ai-prefill-row");
+    const isActive = card?.dataset.active === "true";
+    if (isActive) {
+      section.style.display = "none";
+      if (card) {
+        card.dataset.active = "false";
+        card.classList.remove("active");
+      }
+    } else {
+      section.style.display = "";
+      if (card) {
+        card.dataset.active = "true";
+        card.classList.add("active");
+      }
+      $("new-page-ai-prompt").focus();
+    }
   }
   async function submitNewPage() {
     const rawName = $("new-page-name").value.trim();
@@ -1602,7 +1643,6 @@ ${nestedParts}`;
     $("topbar-badge").textContent = "";
     $("page-title").value = "";
     $("bc-parent").textContent = "yo\u0131nko";
-    $("compose-btn").classList.add("hidden");
     $("edit-toggle-btn").classList.add("hidden");
     hideSaveState();
   }
@@ -1690,40 +1730,8 @@ ${nestedParts}`;
       }
     }, 900);
   }
-  function openCompose() {
-    $("compose-popup").classList.toggle("open");
-    $("compose-input").focus();
-  }
-  async function submitCompose() {
-    const prompt = $("compose-input").value.trim();
-    if (!prompt || !state.currentPage) return;
-    const btn = $("compose-submit");
-    btn.disabled = true;
-    btn.textContent = "Generating\u2026";
-    showMascotLoading("Generating section\u2026", "Yoyo is composing new content");
-    try {
-      const { content: newSection } = await api.generate({
-        prompt,
-        type: state.currentPage.file_type || "md",
-        context: (state.currentPage.content || "").slice(0, 1500)
-      });
-      const sep = state.currentPage.file_type === "html" ? "\n\n<!-- section -->\n" : "\n\n---\n\n";
-      const newContent = (state.currentPage.content || "") + sep + newSection;
-      await api.updatePage(state.currentPageId, { content: newContent });
-      state.currentPage.content = newContent;
-      $("compose-popup").classList.remove("open");
-      $("compose-input").value = "";
-      await renderPage(state.currentPageId);
-      showToast("Section added!");
-    } catch (err) {
-      showToast("AI failed: " + err.message, "error");
-    } finally {
-      hideMascotLoading();
-      btn.disabled = false;
-      btn.textContent = "\u2728 Generate";
-    }
-  }
   function toggleChat() {
+    if (!state.aiEnabled) return;
     state.chatOpen = !state.chatOpen;
     $("chat-drawer").classList.toggle("open", state.chatOpen);
     if (state.chatOpen && state.currentPageId) loadChatHistory();
@@ -1903,6 +1911,7 @@ ${nestedParts}`;
   }
   function closeSettings() {
     $("settings-overlay").classList.remove("open");
+    void applyAIVisibility();
   }
   function renderProfilesList() {
     const list = $("profiles-list");
@@ -1990,7 +1999,13 @@ ${nestedParts}`;
     if (!selectedProfileId) return;
     const profile = profilesList.find((p) => p.id === selectedProfileId);
     if (!profile) return;
-    if (!confirm(`Delete profile "${profile.name}"?`)) return;
+    const nameEl = document.getElementById("delete-profile-name");
+    if (nameEl) nameEl.textContent = `"${profile.name}"`;
+    document.getElementById("delete-profile-overlay")?.classList.add("open");
+  }
+  async function confirmDeleteProfile() {
+    document.getElementById("delete-profile-overlay")?.classList.remove("open");
+    if (!selectedProfileId) return;
     try {
       await api.deleteProfile(selectedProfileId);
       const { profiles, activeId } = await api.getProfiles();
@@ -2068,13 +2083,19 @@ ${nestedParts}`;
     const result = marked.parse(text || "", { async: false, gfm: true, breaks: false });
     const html = typeof result === "string" ? result : `<pre>${esc(text || "")}</pre>`;
     return html.replace(
-      /<ul>\s*(<li>\s*<input[^>]*type="checkbox"[^>]*>[\s\S]*?<\/li>\s*)<\/ul>/g,
-      (_, items) => {
-        const converted = items.replace(
-          /<li>\s*<input([^>]*)type="checkbox"([^>]*)>([\s\S]*?)<\/li>/g,
-          (_m, pre, post, content) => {
-            const checked = (pre + post).includes("checked") ? 'data-checked="true"' : 'data-checked="false"';
-            return `<li data-type="taskItem" ${checked}><label><input type="checkbox" ${(pre + post).includes("checked") ? "checked" : ""}><span>${content.trim()}</span></label></li>`;
+      /<ul[^>]*>([\s\S]*?)<\/ul>/g,
+      (fullMatch, inner) => {
+        if (!/<input[^>]+type="checkbox"/.test(inner)) return fullMatch;
+        const converted = inner.replace(
+          /<li>([\s\S]*?)<\/li>/g,
+          (_m, content) => {
+            const cbMatch = content.match(/<input([^>]*)type="checkbox"([^>]*)>/);
+            if (!cbMatch) return `<li>${content}</li>`;
+            const allAttrs = (cbMatch[1] || "") + (cbMatch[2] || "");
+            const isChecked = /checked/.test(allAttrs);
+            let itemHtml = content.replace(/<input[^>]+type="checkbox"[^>]*>/g, "").trim();
+            itemHtml = itemHtml.replace(/^<p>([\s\S]*?)<\/p>$/, "$1").trim();
+            return `<li data-type="taskItem" ${isChecked ? 'data-checked="true"' : 'data-checked="false"'}><label><input type="checkbox" ${isChecked ? "checked" : ""}><span>${itemHtml}</span></label></li>`;
           }
         );
         return `<ul data-type="taskList">${converted}</ul>`;
@@ -2103,15 +2124,7 @@ ${nestedParts}`;
       this.style.height = "auto";
       this.style.height = Math.min(this.scrollHeight, 120) + "px";
     });
-    $("compose-btn").addEventListener("click", openCompose);
-    $("compose-input").addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) submitCompose();
-      if (e.key === "Escape") $("compose-popup").classList.remove("open");
-    });
     document.addEventListener("click", (e) => {
-      if (!e.target.closest(".compose-popup") && !e.target.closest("#compose-btn")) {
-        $("compose-popup").classList.remove("open");
-      }
       if (state.chatOpen && !e.target.closest(".chat-drawer") && !e.target.closest("#chat-toggle")) {
         state.chatOpen = false;
         $("chat-drawer").classList.remove("open");
@@ -2143,7 +2156,6 @@ ${nestedParts}`;
         closeConfirmDelete(false);
         closeCreateProjectModal();
         closeRenameProjectModal();
-        $("compose-popup").classList.remove("open");
       }
     });
     $("page-title").addEventListener("input", onTitleChange);

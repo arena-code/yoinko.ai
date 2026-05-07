@@ -82,7 +82,6 @@ declare global {
     selectProvider: (p: string) => void;
 
     toggleHtmlEditMode: () => void;
-    submitCompose: () => void;
     triggerUpload: (pageId: string) => void;
     handleFileUpload: (e: Event, pageId: string) => void;
     clearChat: () => void;
@@ -104,6 +103,7 @@ declare global {
     cloudLogout: () => void;
     addNewProfile: () => void;
     deleteCurrentProfile: () => void;
+    confirmDeleteProfile: () => void;
     setActiveCurrentProfile: () => void;
     saveCurrentProfile: () => void;
     selectProfileItem: (id: string) => void;
@@ -132,6 +132,7 @@ interface AppState {
   wysiwyg: TipTapEditor | null;
   previewMode?: boolean;
   editMode?: boolean;
+  aiEnabled: boolean;
 }
 
 const state: AppState = {
@@ -146,6 +147,7 @@ const state: AppState = {
   expandedFolders: new Set(),
   settings: {},
   wysiwyg: null,
+  aiEnabled: false,
 };
 
 // ── DOM helpers ───────────────────────────────────────────────────────────────
@@ -185,7 +187,6 @@ async function init(): Promise<void> {
   window.selectProvider = selectProvider;
 
   window.toggleHtmlEditMode = toggleHtmlEditMode;
-  window.submitCompose = submitCompose;
   window.triggerUpload = triggerUpload;
   window.handleFileUpload = handleFileUpload;
   window.clearChat = clearChat;
@@ -205,6 +206,7 @@ async function init(): Promise<void> {
   window.submitRenameProject = submitRenameProject;
   window.addNewProfile = addNewProfile;
   window.deleteCurrentProfile = deleteCurrentProfile;
+  window.confirmDeleteProfile = confirmDeleteProfile;
   window.setActiveCurrentProfile = setActiveCurrentProfile;
   window.saveCurrentProfile = saveCurrentProfile;
   window.selectProfileItem = selectProfileItem;
@@ -228,6 +230,7 @@ async function init(): Promise<void> {
 
   await loadSettings();
   applyTheme(state.theme);
+  await applyAIVisibility();
 
   // Restore sidebar collapsed state
   if (localStorage.getItem('yk-sidebar-collapsed') === '1') {
@@ -480,6 +483,33 @@ async function loadSettings(): Promise<void> {
   } catch { /* silently fail */ }
 }
 
+// ── AI visibility ─────────────────────────────────────────────────────────────
+// Shows/hides all AI-powered UI elements based on whether any LLM profile
+// exists. We do NOT gate on api_key because: (a) keyless providers like local
+// Ollama are valid, (b) the server may mask the key before returning it.
+async function applyAIVisibility(): Promise<void> {
+  try {
+    const { profiles } = await api.getProfiles();
+    // Any configured profile means AI is available
+    state.aiEnabled = profiles.length > 0;
+  } catch {
+    state.aiEnabled = false;
+  }
+
+  const show = state.aiEnabled;
+
+  // Chat toggle FAB
+  const chatToggle = document.getElementById('chat-toggle');
+  if (chatToggle) chatToggle.style.display = show ? '' : 'none';
+
+
+  // Chat drawer — close it if open and AI was just disabled
+  if (!show && state.chatOpen) {
+    state.chatOpen = false;
+    document.getElementById('chat-drawer')?.classList.remove('open');
+  }
+}
+
 // ── Theme ─────────────────────────────────────────────────────────────────────
 function applyTheme(theme: string): void {
   state.theme = theme;
@@ -702,7 +732,7 @@ async function renderPage(pageId: string): Promise<void> {
     const isPage = page.type === 'page';
     const isMd = page.file_type === 'md';
     const isHtml = isPage && page.file_type === 'html';
-    $('compose-btn').classList.toggle('hidden', !isPage || !isMd);
+
     $('html-edit-btn').classList.toggle('hidden', !isHtml);
     if (isHtml) {
       // Reset edit btn label on each navigation
@@ -735,84 +765,91 @@ function updatePreviewToggleBtn(): void { }
 // ── WYSIWYG Editor (TipTap — loaded from local bundle) ───────────────────────
 
 function tiptapToMarkdown(doc: TipTapDoc): string {
+  // ── Inline (marks) ────────────────────────────────────────────────────────
   function inline(nodes?: TipTapDoc[]): string {
     if (!nodes) return '';
     return nodes.map(n => {
+      if (n.type === 'hardBreak') return '  \n';
       let t = n.text || '';
       if (n.marks) {
+        // code mark: no inner markdown, return immediately
+        if (n.marks.some(m => m.type === 'code')) return `\`${t}\``;
         n.marks.forEach(m => {
-          if (m.type === 'bold') t = `**${t}**`;
-          else if (m.type === 'italic') t = `*${t}*`;
-          else if (m.type === 'strike') t = `~~${t}~~`;
-          else if (m.type === 'code') t = `\`${t}\``;
+          if      (m.type === 'bold')      t = `**${t}**`;
+          else if (m.type === 'italic')    t = `*${t}*`;
+          else if (m.type === 'strike')    t = `~~${t}~~`;
           else if (m.type === 'underline') t = `<u>${t}</u>`;
-          else if (m.type === 'link') t = `[${t}](${(m.attrs?.href as string) || ''})`;
+          else if (m.type === 'link')      t = `[${t}](${(m.attrs?.href as string) || ''})`;
         });
       }
       return t;
     }).join('');
   }
 
-  function block(node: TipTapDoc, indent: string): string {
-    indent = indent || '';
+  // ── List item ─────────────────────────────────────────────────────────────
+  function serializeListItem(node: TipTapDoc, prefix: string): string {
+    const c = node.content || [];
+    if (c.length === 0) return prefix + '\n';
+    const first = c[0];
+    const textLine = first.type === 'paragraph'
+      ? inline(first.content).trimEnd()
+      : blk(first).trimEnd();
+    // Nested lists indented by 4 spaces
+    const nested = c.slice(1).map(n => blk(n).replace(/^(?=.)/gm, '    ')).join('');
+    return prefix + textLine + '\n' + nested;
+  }
+
+  // ── Block ─────────────────────────────────────────────────────────────────
+  function blk(node: TipTapDoc): string {
     const t = node.type;
     const c = node.content || [];
-    if (t === 'doc') return c.map(n => block(n, '')).join('\n');
-    if (t === 'paragraph') return indent + (inline(c) || '') + '\n';
-    if (t === 'heading') return '#'.repeat(node.attrs?.level as number) + ' ' + inline(c) + '\n';
+
+    if (t === 'doc') return c.map(n => blk(n)).join('\n');
+    if (t === 'paragraph') return inline(c) + '\n';
+    if (t === 'heading') return '#'.repeat((node.attrs?.level as number) || 1) + ' ' + inline(c) + '\n';
     if (t === 'horizontalRule') return '---\n';
+
     if (t === 'codeBlock') {
       const lang = (node.attrs?.language as string) || '';
       const code = c.map(n => n.text || '').join('');
       return `\`\`\`${lang}\n${code}\n\`\`\`\n`;
     }
-    if (t === 'blockquote') return c.map(n => '> ' + block(n, '').trimEnd()).join('\n') + '\n';
-    if (t === 'bulletList') return c.map(n => block(n, '- ')).join('');
+
+    if (t === 'blockquote') {
+      return c.map(n => blk(n).replace(/^/gm, '> ').replace(/> $/gm, '>').trimEnd())
+              .join('\n') + '\n';
+    }
+
+    if (t === 'bulletList')  return c.map(n => serializeListItem(n, '- ')).join('');
     if (t === 'orderedList') {
       let i = (node.attrs?.start as number) || 1;
-      return c.map(n => block(n, `${i++}. `)).join('');
+      return c.map(n => serializeListItem(n, `${i++}. `)).join('');
     }
+
     if (t === 'taskList') {
       return c.map(n => {
-        const checked = n.attrs?.checked;
+        const checked  = n.attrs?.checked;
         const checkbox = checked ? '[x]' : '[ ]';
-        // First child is the paragraph with the task text; remaining are nested lists
         const children = n.content || [];
-        const first = children[0];
+        const first    = children[0];
         const textPart = first
-          ? (first.type === 'paragraph' ? inline(first.content).trimEnd() : block(first, '').trimEnd())
+          ? (first.type === 'paragraph' ? inline(first.content).trimEnd() : blk(first).trimEnd())
           : '';
-        const nestedParts = children.slice(1).map(n2 =>
-          block(n2, '').replace(/^(.)/gm, '  $1')
-        ).join('');
-        return `- ${checkbox} ${textPart}\n${nestedParts}`;
+        const nested = children.slice(1).map(n2 => blk(n2).replace(/^(?=.)/gm, '    ')).join('');
+        return `- ${checkbox} ${textPart}\n${nested}`;
       }).join('');
     }
-    if (t === 'listItem' || t === 'taskItem') {
-      // Serialize child blocks; nested lists need extra indentation
-      const parts = c.map(n => {
-        if (n.type === 'bulletList' || n.type === 'orderedList' || n.type === 'taskList') {
-          // Indent every line of the nested list by 2 spaces
-          return block(n, '').replace(/^(.)/gm, '  $1');
-        }
-        return block(n, '').trimEnd();
-      });
-      // Use '' as separator — each block already ends with \n
-      return indent + parts.join('\n') + '\n';
-    }
+
     if (t === 'hardBreak') return '  \n';
-    if (t === 'text') return node.text || '';
+    if (t === 'text')      return node.text || '';
+
     if (t === 'table') {
-      // Each tableRow → one Markdown row; first row gets a separator after it
       const rows = c.map((row, rowIdx) => {
         const cells = (row.content || []).map(cell => {
-          // Collapse all inline content of the cell into a single string
-          const cellText = (cell.content || []).map(n => block(n, '')).join('').replace(/\n/g, ' ').trim();
-          return cellText;
+          return (cell.content || []).map(n => blk(n)).join('').replace(/\n/g, ' ').trim();
         });
         const rowStr = '| ' + cells.join(' | ') + ' |';
         if (rowIdx === 0) {
-          // Header separator row
           const sep = '| ' + cells.map(() => '----------').join(' | ') + ' |';
           return rowStr + '\n' + sep;
         }
@@ -820,11 +857,12 @@ function tiptapToMarkdown(doc: TipTapDoc): string {
       });
       return rows.join('\n') + '\n';
     }
-    return c.map(n => block(n, indent)).join('');
+
+    return c.map(n => blk(n)).join('');
   }
 
   try {
-    return block(doc, '').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
+    return blk(doc).replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
   } catch {
     return '';
   }
@@ -1647,6 +1685,18 @@ let _ctxFolderId: string | null = null;
 
 function openNewPageModal(defaultType: 'page' | 'folder' | 'image' = 'page', ctxFolderId?: string): void {
   _ctxFolderId = ctxFolderId || null;
+
+  // If AI not configured, block opening the AI Image type
+  if (defaultType === 'image' && !state.aiEnabled) defaultType = 'page';
+
+  // Reflect AI availability on the AI Image type-option
+  const imageOption = document.getElementById('type-option-image');
+  if (imageOption) {
+    imageOption.style.opacity      = state.aiEnabled ? '' : '0.4';
+    imageOption.style.pointerEvents = state.aiEnabled ? '' : 'none';
+    imageOption.title               = state.aiEnabled ? '' : 'Configure an AI profile first';
+  }
+
   $('new-page-overlay').classList.add('open');
   ($('new-page-type') as HTMLSelectElement).value = defaultType;
   updateTypeOptions(defaultType);
@@ -1686,13 +1736,21 @@ function closeNewPageModal(): void {
 function updateTypeOptions(type: string): void {
   $$('.type-option').forEach(opt => opt.classList.toggle('selected', opt.dataset.type === type));
   const isFolder = type === 'folder';
-  const isImage = type === 'image';
-  $('new-page-file-type-row').style.display = (isFolder || isImage) ? 'none' : '';
-  $('new-page-parent-row').style.display = (isFolder || isImage) ? 'none' : '';
-  $('new-page-ai-prefill-row').style.display = isImage ? 'none' : '';
-  $('new-page-ai-section').style.display = 'none';
-  $('new-page-image-section').style.display = isImage ? '' : 'none';
-  // Update name field label + placeholder to match context
+  const isImage  = type === 'image';
+  $('new-page-file-type-row').style.display  = (isFolder || isImage) ? 'none' : '';
+  $('new-page-parent-row').style.display     = (isFolder || isImage) ? 'none' : '';
+  $('new-page-ai-section').style.display     = 'none';
+  $('new-page-image-section').style.display  = isImage ? '' : 'none';
+
+  // Pre-fill with AI: never shown for folders, only shown for pages when AI enabled
+  const showPrefill = !isFolder && !isImage && state.aiEnabled;
+  $('new-page-ai-prefill-row').style.display = showPrefill ? '' : 'none';
+  if (!showPrefill) $('new-page-ai-section').style.display = 'none';
+  // Reset active state when switching types
+  const card = $('new-page-ai-prefill-row');
+  if (card) { card.classList.remove('active'); card.dataset.active = 'false'; }
+
+  // Update name field placeholder
   const nameInput = $('new-page-name') as HTMLInputElement;
   const nameLabel = nameInput.previousElementSibling as HTMLLabelElement;
   if (isImage) {
@@ -1717,9 +1775,19 @@ function selectType(type: 'page' | 'folder'): void {
 
 function toggleAiFill(): void {
   const section = $('new-page-ai-section');
-  const isHidden = section.style.display === 'none' || !section.style.display;
-  section.style.display = isHidden ? '' : 'none';
-  if (isHidden) ($('new-page-ai-prompt') as HTMLInputElement).focus();
+  const card    = $('new-page-ai-prefill-row'); // the card IS the prefill row
+  const isActive = card?.dataset.active === 'true';
+
+  if (isActive) {
+    // Deactivate
+    section.style.display = 'none';
+    if (card) { card.dataset.active = 'false'; card.classList.remove('active'); }
+  } else {
+    // Activate
+    section.style.display = '';
+    if (card) { card.dataset.active = 'true'; card.classList.add('active'); }
+    ($('new-page-ai-prompt') as HTMLInputElement).focus();
+  }
 }
 
 async function submitNewPage(): Promise<void> {
@@ -1844,7 +1912,7 @@ function showWelcome(): void {
   $('topbar-badge').textContent = '';
   ($('page-title') as HTMLInputElement).value = '';
   $('bc-parent').textContent = 'yoınko';
-  $('compose-btn').classList.add('hidden');
+
   $('edit-toggle-btn').classList.add('hidden');
   hideSaveState();
 }
@@ -1947,46 +2015,10 @@ function onTitleChange(e: Event): void {
   }, 900);
 }
 
-// ── Compose (+ button AI section) ─────────────────────────────────────────────
-function openCompose(): void {
-  $('compose-popup').classList.toggle('open');
-  ($('compose-input') as HTMLInputElement).focus();
-}
-
-async function submitCompose(): Promise<void> {
-  const prompt = ($('compose-input') as HTMLInputElement).value.trim();
-  if (!prompt || !state.currentPage) return;
-
-  const btn = $('compose-submit') as HTMLButtonElement;
-  btn.disabled = true;
-  btn.textContent = 'Generating…';
-  showMascotLoading('Generating section…', 'Yoyo is composing new content');
-
-  try {
-    const { content: newSection } = await api.generate({
-      prompt,
-      type: state.currentPage.file_type || 'md',
-      context: (state.currentPage.content || '').slice(0, 1500),
-    });
-    const sep = state.currentPage.file_type === 'html' ? '\n\n<!-- section -->\n' : '\n\n---\n\n';
-    const newContent = (state.currentPage.content || '') + sep + newSection;
-    await api.updatePage(state.currentPageId!, { content: newContent });
-    state.currentPage.content = newContent;
-    $('compose-popup').classList.remove('open');
-    ($('compose-input') as HTMLInputElement).value = '';
-    await renderPage(state.currentPageId!);
-    showToast('Section added!');
-  } catch (err) {
-    showToast('AI failed: ' + (err as Error).message, 'error');
-  } finally {
-    hideMascotLoading();
-    btn.disabled = false;
-    btn.textContent = '✨ Generate';
-  }
-}
 
 // ── Chat drawer ───────────────────────────────────────────────────────────────
 function toggleChat(): void {
+  if (!state.aiEnabled) return; // no AI configured — ignore
   state.chatOpen = !state.chatOpen;
   $('chat-drawer').classList.toggle('open', state.chatOpen);
   if (state.chatOpen && state.currentPageId) loadChatHistory();
@@ -2200,6 +2232,8 @@ async function openSettings(): Promise<void> {
 
 function closeSettings(): void {
   $('settings-overlay').classList.remove('open');
+  // Re-evaluate AI availability in case the user just added/removed a profile
+  void applyAIVisibility();
 }
 
 function renderProfilesList(): void {
@@ -2305,8 +2339,15 @@ async function deleteCurrentProfile(): Promise<void> {
   const profile = profilesList.find(p => p.id === selectedProfileId);
   if (!profile) return;
 
-  if (!confirm(`Delete profile "${profile.name}"?`)) return;
+  // Show custom confirmation modal instead of native confirm()
+  const nameEl = document.getElementById('delete-profile-name');
+  if (nameEl) nameEl.textContent = `"${profile.name}"`;
+  document.getElementById('delete-profile-overlay')?.classList.add('open');
+}
 
+async function confirmDeleteProfile(): Promise<void> {
+  document.getElementById('delete-profile-overlay')?.classList.remove('open');
+  if (!selectedProfileId) return;
   try {
     await api.deleteProfile(selectedProfileId);
     const { profiles, activeId } = await api.getProfiles();
@@ -2402,21 +2443,32 @@ function renderMarkdown(text: string): string {
   if (typeof marked === 'undefined') return `<pre>${esc(text || '')}</pre>`;
   const result = marked.parse(text || '', { async: false, gfm: true, breaks: false });
   const html = typeof result === 'string' ? result : `<pre>${esc(text || '')}</pre>`;
-  // Convert marked's checkbox <li> items into TipTap taskList/taskItem format
-  return html
-    .replace(
-      /<ul>\s*(<li>\s*<input[^>]*type="checkbox"[^>]*>[\s\S]*?<\/li>\s*)<\/ul>/g,
-      (_, items) => {
-        const converted = items.replace(
-          /<li>\s*<input([^>]*)type="checkbox"([^>]*)>([\s\S]*?)<\/li>/g,
-          (_m: string, pre: string, post: string, content: string) => {
-            const checked = (pre + post).includes('checked') ? 'data-checked="true"' : 'data-checked="false"';
-            return `<li data-type="taskItem" ${checked}><label><input type="checkbox" ${(pre + post).includes('checked') ? 'checked' : ''}><span>${content.trim()}</span></label></li>`;
-          }
-        );
-        return `<ul data-type="taskList">${converted}</ul>`;
-      }
-    );
+
+  // Convert marked's GFM checkbox output to TipTap taskList/taskItem.
+  // marked produces:
+  //   tight: <ul>\n<li><input type="checkbox" disabled=""> text</li>\n</ul>
+  //   loose: <ul>\n<li><input ...> <p>text</p>\n</li>\n</ul>
+  return html.replace(
+    /<ul[^>]*>([\s\S]*?)<\/ul>/g,
+    (fullMatch, inner) => {
+      if (!/<input[^>]+type="checkbox"/.test(inner)) return fullMatch;
+      const converted = inner.replace(
+        /<li>([\s\S]*?)<\/li>/g,
+        (_m: string, content: string) => {
+          const cbMatch = content.match(/<input([^>]*)type="checkbox"([^>]*)>/);
+          if (!cbMatch) return `<li>${content}</li>`;
+          const allAttrs = (cbMatch[1] || '') + (cbMatch[2] || '');
+          const isChecked = /checked/.test(allAttrs);
+          let itemHtml = content.replace(/<input[^>]+type="checkbox"[^>]*>/g, '').trim();
+          // Unwrap loose <p> wrapper if present
+          itemHtml = itemHtml.replace(/^<p>([\s\S]*?)<\/p>$/, '$1').trim();
+          return `<li data-type="taskItem" ${isChecked ? 'data-checked="true"' : 'data-checked="false"'}>` +
+                 `<label><input type="checkbox" ${isChecked ? 'checked' : ''}><span>${itemHtml}</span></label></li>`;
+        }
+      );
+      return `<ul data-type="taskList">${converted}</ul>`;
+    }
+  );
 }
 
 // ── HTML escape ───────────────────────────────────────────────────────────────
@@ -2445,17 +2497,8 @@ function setupEventListeners(): void {
     this.style.height = Math.min(this.scrollHeight, 120) + 'px';
   });
 
-  $('compose-btn').addEventListener('click', openCompose);
-  ($('compose-input') as HTMLInputElement).addEventListener('keydown', (e: KeyboardEvent) => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submitCompose();
-    if (e.key === 'Escape') $('compose-popup').classList.remove('open');
-  });
 
   document.addEventListener('click', (e: MouseEvent) => {
-    if (!(e.target as Element).closest('.compose-popup') && !(e.target as Element).closest('#compose-btn')) {
-      $('compose-popup').classList.remove('open');
-    }
-    // Close chat drawer when clicking outside
     if (state.chatOpen && !(e.target as Element).closest('.chat-drawer') && !(e.target as Element).closest('#chat-toggle')) {
       state.chatOpen = false;
       $('chat-drawer').classList.remove('open');
@@ -2478,7 +2521,7 @@ function setupEventListeners(): void {
       closeConfirmDelete(false);
       closeCreateProjectModal();
       closeRenameProjectModal();
-      $('compose-popup').classList.remove('open');
+
     }
   });
 

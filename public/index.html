@@ -39,8 +39,13 @@
         </div>
         <!-- Project switcher -->
         <div class="project-switcher" id="project-switcher"></div>
-        <button class="sidebar-collapse-btn" id="sidebar-collapse-btn" onclick="toggleSidebar()" title="Collapse sidebar">
-          <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14"><path fill-rule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+        <button class="sidebar-collapse-btn" id="sidebar-collapse-btn" onclick="toggleSidebar()"
+          title="Collapse sidebar">
+          <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14">
+            <path fill-rule="evenodd"
+              d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z"
+              clip-rule="evenodd" />
+          </svg>
         </button>
       </div>
 
@@ -184,31 +189,9 @@
   </div><!-- #app -->
 
   <!-- ══ Floating buttons ═══════════════════════════════════════════════════ -->
-  <button class="compose-btn hidden" id="compose-btn" title="Add section with AI" style="display:none">
-    <svg viewBox="0 0 20 20" fill="currentColor" style="width:20px;height:20px">
-      <path fill-rule="evenodd"
-        d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" />
-    </svg>
-  </button>
-
   <button class="chat-toggle" id="chat-toggle">
     <img src="/mascot.svg" alt="Yoinko" class="chat-toggle-mascot">
   </button>
-
-  <!-- Compose popup -->
-  <div class="compose-popup" id="compose-popup">
-    <div class="compose-popup-title">
-      ✨ Add section with AI
-    </div>
-    <textarea class="compose-popup-input" id="compose-input"
-      placeholder="Describe what to add… e.g. 'Add a section about best practices'"></textarea>
-    <div class="compose-popup-actions">
-      <button class="btn btn-ghost btn-sm" onclick="$('compose-popup').classList.remove('open')">Cancel</button>
-      <button class="btn btn-primary btn-sm" id="compose-submit" onclick="submitCompose()">
-        ✨ Generate
-      </button>
-    </div>
-  </div>
 
   <!-- ══ MODALS ══════════════════════════════════════════════════════════════ -->
 
@@ -239,7 +222,7 @@
             <div class="type-option-name">Folder</div>
             <div class="type-option-desc">Group pages</div>
           </div>
-          <div class="type-option" data-type="image" onclick="selectType('image')">
+          <div class="type-option" data-type="image" id="type-option-image" onclick="selectType('image')">
             <div class="type-option-icon">🖼️</div>
             <div class="type-option-name">AI Image</div>
             <div class="type-option-desc">Generate art</div>
@@ -268,26 +251,21 @@
         </select>
       </div>
 
-      <!-- AI Fill toggle -->
-      <div class="ai-fill-toggle" id="new-page-ai-toggle" data-active="false" onclick="toggleAiFill()"
-        style="display:none">
-        <div class="ai-fill-toggle-icon">✨</div>
-        <div>
-          <div class="ai-fill-toggle-text">Pre-fill with AI</div>
+      <!-- AI Pre-fill card -->
+      <div id="new-page-ai-prefill-row" class="ai-prefill-card" id="ai-prefill-btn" onclick="toggleAiFill()">
+        <img src="/mascot.svg" alt="Yoyo" class="ai-prefill-mascot">
+        <div class="ai-prefill-copy">
+          <span class="ai-prefill-title">Let Yoyo write a draft</span>
+          <span class="ai-prefill-sub">AI pre-fills the page for you</span>
         </div>
-        <div class="ai-fill-toggle-check" id="ai-fill-check"></div>
-      </div>
-      <div id="new-page-ai-prefill-row" style="display:flex;gap:8px;margin-top:10px;">
-        <button type="button" onclick="toggleAiFill()"
-          style="background:transparent;border:1px dashed var(--border);border-radius:var(--radius-sm);padding:8px 14px;color:var(--text-dim);font-family:'Syne',sans-serif;font-size:13px;cursor:pointer;transition:all 0.13s;display:flex;align-items:center;gap:6px;width:100%;"
-          onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
-          ✨ Pre-fill with AI
-        </button>
+        <div class="ai-prefill-toggle" id="ai-prefill-toggle-pill">
+          <div class="ai-prefill-toggle-knob"></div>
+        </div>
       </div>
 
       <div id="new-page-ai-section" style="display:none;margin-top:14px;">
         <div class="form-group">
-          <label class="form-label" id="ai-prompt-label" for="new-page-ai-prompt">Describe the content to
+          <label class="form-label" id="ai-prompt-label" for="new-page-ai-prompt">Describe the content for Yoyo to
             generate:</label>
           <textarea class="form-textarea" id="new-page-ai-prompt"
             placeholder="e.g. 'Write a guide on REST API design best practices'"></textarea>
@@ -593,6 +571,31 @@
         <button class="btn btn-ghost"
           onclick="document.getElementById('delete-overlay').classList.remove('open')">Cancel</button>
         <button class="btn btn-danger" id="delete-submit-btn" onclick="submitDelete()">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Delete Profile confirmation modal -->
+  <div class="modal-overlay" id="delete-profile-overlay">
+    <div class="modal" style="max-width:420px">
+      <div class="modal-title">
+        Delete AI profile?
+        <button class="modal-close"
+          onclick="document.getElementById('delete-profile-overlay').classList.remove('open')">
+          <svg viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd"
+              d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+              clip-rule="evenodd" />
+          </svg>
+        </button>
+      </div>
+      <p style="margin:0 0 20px;color:var(--text-muted);font-size:14px;">
+        Are you sure you want to delete the profile <strong id="delete-profile-name"></strong>? This cannot be undone.
+      </p>
+      <div class="modal-actions">
+        <button class="btn btn-ghost"
+          onclick="document.getElementById('delete-profile-overlay').classList.remove('open')">Cancel</button>
+        <button class="btn btn-danger" onclick="confirmDeleteProfile()">Delete</button>
       </div>
     </div>
   </div>
