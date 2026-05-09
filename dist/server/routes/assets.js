@@ -7,6 +7,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { getProjectDb } from '../db.js';
 import { getProjectDirs, listProjects } from '../projects.js';
 import { projectId, dataDir } from '../request-helpers.js';
+import { getTenantUsedBytes, getStorageLimit } from '../storage.js';
+const CLOUD_ENABLED = process.env.YOINKO_CLOUD === 'true';
 const router = express.Router();
 const now = () => new Date().toISOString();
 // Dynamic multer storage — destination resolved per-request from X-Project-Id
@@ -54,12 +56,44 @@ const upload = multer({
         cb(new Error(`File type not allowed: .${ext || 'unknown'}`));
     },
 });
+// Pre-flight quota check — rejects immediately if the tenant is already at the limit
+function quotaCheck(req, res, next) {
+    if (!CLOUD_ENABLED)
+        return next();
+    const dd = dataDir(req);
+    if (!dd)
+        return next();
+    const limit = getStorageLimit(req.tenantPlan || 'basic');
+    const used = getTenantUsedBytes(dd);
+    if (used >= limit) {
+        res.status(413).json({ error: 'Storage limit reached. Delete files to free up space.' });
+        return;
+    }
+    next();
+}
 // ── POST /api/assets/upload ───────────────────────────────────────────────────
-router.post('/upload', upload.array('files', 20), (req, res) => {
+router.post('/upload', quotaCheck, upload.array('files', 20), (req, res) => {
     try {
         const { page_id } = req.body;
-        const db = getProjectDb(projectId(req), dataDir(req));
+        const dd = dataDir(req);
+        const db = getProjectDb(projectId(req), dd);
         const files = req.files;
+        // Post-upload quota check: if this batch pushed us over the limit, reject and clean up
+        if (CLOUD_ENABLED && dd) {
+            const limit = getStorageLimit(req.tenantPlan || 'basic');
+            const batchSize = files.reduce((sum, f) => sum + f.size, 0);
+            const usedAfter = getTenantUsedBytes(dd) + batchSize;
+            if (usedAfter > limit) {
+                for (const f of files) {
+                    try {
+                        fs.unlinkSync(f.path);
+                    }
+                    catch { /* ignore */ }
+                }
+                res.status(413).json({ error: 'Upload would exceed your 5 GB storage limit.' });
+                return;
+            }
+        }
         const results = [];
         for (const file of files) {
             const id = uuidv4();

@@ -8,9 +8,11 @@ import assetsRouter from './routes/assets.js';
 import aiRouter from './routes/ai.js';
 import settingsRouter from './routes/settings.js';
 import projectsRouter from './routes/projects.js';
+import storageRouter from './routes/storage.js';
 import authRouter from './routes/auth.js';
 import { migrateOnStartup } from './projects.js';
 import { cloudAuth, invalidateTenantCache } from './middleware/cloud-auth.js';
+import { workspaceAccessCheck } from './middleware/workspace-auth.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
@@ -58,11 +60,12 @@ app.post('/api/admin/invalidate-tenant-cache', (req, res) => {
 // ── Cloud auth (no-op when YOINKO_CLOUD is not set) ───────────────────────────
 app.use(cloudAuth);
 // ── API Routes ────────────────────────────────────────────────────────────────
-app.use('/api/pages', pagesRouter);
-app.use('/api/assets', assetsRouter);
-app.use('/api/ai', aiRouter);
+app.use('/api/pages', workspaceAccessCheck, pagesRouter);
+app.use('/api/assets', workspaceAccessCheck, assetsRouter);
+app.use('/api/ai', workspaceAccessCheck, aiRouter);
 app.use('/api/settings', settingsRouter);
 app.use('/api/projects', projectsRouter);
+app.use('/api/storage', storageRouter);
 // ── Health check ──────────────────────────────────────────────────────────────
 app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok', version: '1.0.0', app: 'yoinko', cloud: CLOUD_ENABLED });
@@ -78,8 +81,61 @@ app.get('/api/me', (req, res) => {
         user: {
             email: user.email || null,
             tenantId: user.tenantId || null,
+            isOwner: req.isOwner ?? true,
+            plan: req.tenantPlan ?? 'basic',
         },
     });
+});
+// ── Team members list (cloud, owner only) ────────────────────────────────────
+// Returns all users who are members of the current tenant so the owner can
+// pick from them when granting workspace access.
+app.get('/api/me/team', async (req, res) => {
+    if (!CLOUD_ENABLED) {
+        res.json({ members: [] });
+        return;
+    }
+    const supabaseTenantId = req.supabaseTenantId;
+    if (!supabaseTenantId) {
+        res.json({ members: [] });
+        return;
+    }
+    const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+    const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
+        res.json({ members: [] });
+        return;
+    }
+    const headers = { 'apikey': SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}` };
+    try {
+        // 1. Get all user_ids in this tenant
+        const memberRes = await fetch(`${SUPABASE_URL}/rest/v1/tenant_members?tenant_id=eq.${supabaseTenantId}&select=user_id`, { headers });
+        if (!memberRes.ok) {
+            res.json({ members: [] });
+            return;
+        }
+        const memberRows = await memberRes.json();
+        if (!memberRows.length) {
+            res.json({ members: [] });
+            return;
+        }
+        // 2. Fetch each user's email from the auth admin API (parallelised)
+        const userDetails = await Promise.all(memberRows.map(async ({ user_id }) => {
+            try {
+                const r = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${user_id}`, { headers });
+                if (!r.ok)
+                    return null;
+                const u = await r.json();
+                return u.email ? { user_id: u.id, email: u.email } : null;
+            }
+            catch {
+                return null;
+            }
+        }));
+        res.json({ members: userDetails.filter(Boolean) });
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 // ── SPA fallback ──────────────────────────────────────────────────────────────
 app.get('*', (_req, res) => {

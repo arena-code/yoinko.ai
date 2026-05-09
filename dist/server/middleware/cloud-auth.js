@@ -166,10 +166,13 @@ async function refreshAccessToken(refreshToken) {
         return null;
     }
 }
-function makeTenantInfo(subdomain, status) {
+function makeTenantInfo(id, ownerId, subdomain, status, plan) {
     return {
+        supabaseTenantId: id,
+        ownerId,
         subdomain,
         status,
+        plan: plan || 'basic',
         dataDir: path.join(CLOUD_DATA_ROOT, subdomain),
     };
 }
@@ -189,14 +192,15 @@ async function lookupTenant(userId) {
     };
     try {
         // 1. Owned tenant (most common path)
-        const ownedRes = await fetch(`${SUPABASE_URL}/rest/v1/tenants?user_id=eq.${userId}&select=subdomain,status&limit=1`, { headers });
+        const ownedRes = await fetch(`${SUPABASE_URL}/rest/v1/tenants?user_id=eq.${userId}&select=id,user_id,subdomain,status,plan&limit=1`, { headers });
         if (!ownedRes.ok) {
             console.error(`[cloud-auth] Tenants lookup failed: ${ownedRes.status}`);
             return null;
         }
         const ownedRows = await ownedRes.json();
         if (ownedRows.length && ownedRows[0].status === 'active') {
-            const tenant = makeTenantInfo(ownedRows[0].subdomain, ownedRows[0].status);
+            const r = ownedRows[0];
+            const tenant = makeTenantInfo(r.id, r.user_id, r.subdomain, r.status, r.plan);
             tenantCache.set(userId, { tenant, expiresAt: Date.now() + CACHE_TTL_MS });
             return tenant;
         }
@@ -213,7 +217,7 @@ async function lookupTenant(userId) {
         if (!memberRows.length)
             return null;
         const memberTenantId = memberRows[0].tenant_id;
-        const memberTenantRes = await fetch(`${SUPABASE_URL}/rest/v1/tenants?id=eq.${memberTenantId}&select=subdomain,status&limit=1`, { headers });
+        const memberTenantRes = await fetch(`${SUPABASE_URL}/rest/v1/tenants?id=eq.${memberTenantId}&select=id,user_id,subdomain,status,plan&limit=1`, { headers });
         if (!memberTenantRes.ok) {
             console.error(`[cloud-auth] Member tenant lookup failed: ${memberTenantRes.status}`);
             return null;
@@ -222,7 +226,8 @@ async function lookupTenant(userId) {
         if (!memberTenantRows.length || memberTenantRows[0].status !== 'active') {
             return null;
         }
-        const tenant = makeTenantInfo(memberTenantRows[0].subdomain, memberTenantRows[0].status);
+        const r = memberTenantRows[0];
+        const tenant = makeTenantInfo(r.id, r.user_id, r.subdomain, r.status, r.plan);
         tenantCache.set(userId, { tenant, expiresAt: Date.now() + CACHE_TTL_MS });
         return tenant;
     }
@@ -336,6 +341,9 @@ async function verifyAndContinue(token, req, res, next) {
         // Attach to request for downstream use
         req.user = { id: sub, email, tenantId: tenant.subdomain };
         req.tenantDataDir = tenant.dataDir;
+        req.tenantPlan = tenant.plan;
+        req.isOwner = (sub === tenant.ownerId);
+        req.supabaseTenantId = tenant.supabaseTenantId;
         next();
     }
     catch (err) {

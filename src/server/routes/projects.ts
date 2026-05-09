@@ -8,8 +8,10 @@ import {
   getProject, setProjectLogo, clearProjectLogo, getProjectLogoPath,
   reorderProjects, DATA_DIR,
 } from '../projects.js';
-import { evictProjectDb } from '../db.js';
+import { evictProjectDb, getGlobalDb } from '../db.js';
 import { dataDir } from '../request-helpers.js';
+import { getWorkspaceLimit } from '../storage.js';
+import { v4 as uuidv4 } from 'uuid';
 
 const router = express.Router();
 
@@ -28,18 +30,47 @@ const logoUpload = multer({
 // ── GET /api/projects ─────────────────────────────────────────────────────────
 router.get('/', (req: Request, res: Response) => {
   try {
-    res.json({ projects: listProjects(dataDir(req)) });
+    const dd = dataDir(req);
+    let projects = listProjects(dd);
+
+    // Non-owner members only see workspaces they've been granted access to
+    if (CLOUD_ENABLED && !((req as any).isOwner ?? true)) {
+      const user = (req as any).user;
+      const db = getGlobalDb(dd);
+      const rows = db.prepare<string, { project_id: string }>(
+        'SELECT project_id FROM workspace_access WHERE user_id = ?'
+      ).all(user.id);
+      const accessible = new Set(rows.map(r => r.project_id));
+      projects = projects.filter(p => accessible.has(p.id));
+    }
+
+    res.json({ projects });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
 });
+
+const CLOUD_ENABLED = process.env.YOINKO_CLOUD === 'true';
 
 // ── POST /api/projects ────────────────────────────────────────────────────────
 router.post('/', (req: Request, res: Response) => {
   try {
     const { name } = req.body as { name?: string };
     if (!name?.trim()) return void res.status(400).json({ error: 'name is required' });
-    const project = createProject(name.trim(), dataDir(req));
+
+    const dd = dataDir(req);
+    if (CLOUD_ENABLED) {
+      const plan = (req as any).tenantPlan || 'basic';
+      const wsLimit = getWorkspaceLimit(plan);
+      const existing = listProjects(dd);
+      if (isFinite(wsLimit) && existing.length >= wsLimit) {
+        return void res.status(403).json({
+          error: `Workspace limit reached. Your plan allows up to ${wsLimit} workspaces.`,
+        });
+      }
+    }
+
+    const project = createProject(name.trim(), dd);
     res.status(201).json({ project });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
@@ -153,6 +184,76 @@ router.get('/:id/logo', (req: Request, res: Response) => {
     res.sendFile(path.resolve(filePath));
   } catch (err) {
     res.status(500).send((err as Error).message);
+  }
+});
+
+// ── Workspace access — owner-only helpers ─────────────────────────────────────
+function requireOwner(req: Request, res: Response): boolean {
+  if (!CLOUD_ENABLED) return true;
+  const isOwner = (req as any).isOwner ?? true;
+  if (!isOwner) {
+    res.status(403).json({ error: 'Only the workspace owner can manage access.' });
+    return false;
+  }
+  return true;
+}
+
+// GET /api/projects/:id/access — list users with access to this workspace
+router.get('/:id/access', (req: Request, res: Response) => {
+  try {
+    if (!requireOwner(req, res)) return;
+    const db = getGlobalDb(dataDir(req));
+    const members = db.prepare<string, { user_id: string; user_email: string; role: string; granted_at: string }>(
+      'SELECT user_id, user_email, role, granted_at FROM workspace_access WHERE project_id = ? ORDER BY granted_at ASC'
+    ).all(req.params.id as string);
+    res.json({ members });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// POST /api/projects/:id/access — grant one or more users access
+// Accepts either a single { user_id, user_email, role } or an array of them.
+router.post('/:id/access', (req: Request, res: Response) => {
+  try {
+    if (!requireOwner(req, res)) return;
+
+    type Entry = { user_id: string; user_email: string; role: string };
+    const body = req.body as Entry | Entry[];
+    const entries: Entry[] = Array.isArray(body) ? body : [body];
+
+    if (!entries.length) return void res.status(400).json({ error: 'no entries provided' });
+    for (const e of entries) {
+      if (!e.user_id || !e.user_email) return void res.status(400).json({ error: 'user_id and user_email are required' });
+      if (e.role !== 'read' && e.role !== 'write') return void res.status(400).json({ error: 'role must be read or write' });
+    }
+
+    const db = getGlobalDb(dataDir(req));
+    const stmt = db.prepare(
+      `INSERT INTO workspace_access (id, project_id, user_id, user_email, role, granted_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(project_id, user_id) DO UPDATE SET role = excluded.role`
+    );
+    const now = new Date().toISOString();
+    for (const e of entries) {
+      stmt.run(uuidv4(), req.params.id as string, e.user_id, e.user_email, e.role, now);
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// DELETE /api/projects/:id/access/:userId — revoke access
+router.delete('/:id/access/:userId', (req: Request, res: Response) => {
+  try {
+    if (!requireOwner(req, res)) return;
+    const db = getGlobalDb(dataDir(req));
+    db.prepare('DELETE FROM workspace_access WHERE project_id = ? AND user_id = ?')
+      .run(req.params.id as string, req.params.userId as string);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
   }
 });
 

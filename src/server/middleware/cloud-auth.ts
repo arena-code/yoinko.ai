@@ -27,8 +27,11 @@ interface SupabaseJwtPayload {
 }
 
 interface TenantInfo {
+  supabaseTenantId: string;
+  ownerId: string;
   subdomain: string;
   status: string;
+  plan: string;  // 'basic' | 'plus'
   dataDir: string;
 }
 
@@ -186,10 +189,13 @@ async function refreshAccessToken(refreshToken: string): Promise<string | null> 
   }
 }
 
-function makeTenantInfo(subdomain: string, status: string): TenantInfo {
+function makeTenantInfo(id: string, ownerId: string, subdomain: string, status: string, plan: string): TenantInfo {
   return {
+    supabaseTenantId: id,
+    ownerId,
     subdomain,
     status,
+    plan: plan || 'basic',
     dataDir: path.join(CLOUD_DATA_ROOT, subdomain),
   };
 }
@@ -214,16 +220,17 @@ async function lookupTenant(userId: string): Promise<TenantInfo | null> {
   try {
     // 1. Owned tenant (most common path)
     const ownedRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/tenants?user_id=eq.${userId}&select=subdomain,status&limit=1`,
+      `${SUPABASE_URL}/rest/v1/tenants?user_id=eq.${userId}&select=id,user_id,subdomain,status,plan&limit=1`,
       { headers }
     );
     if (!ownedRes.ok) {
       console.error(`[cloud-auth] Tenants lookup failed: ${ownedRes.status}`);
       return null;
     }
-    const ownedRows = await ownedRes.json() as Array<{ subdomain: string; status: string }>;
+    const ownedRows = await ownedRes.json() as Array<{ id: string; user_id: string; subdomain: string; status: string; plan: string }>;
     if (ownedRows.length && ownedRows[0].status === 'active') {
-      const tenant = makeTenantInfo(ownedRows[0].subdomain, ownedRows[0].status);
+      const r = ownedRows[0];
+      const tenant = makeTenantInfo(r.id, r.user_id, r.subdomain, r.status, r.plan);
       tenantCache.set(userId, { tenant, expiresAt: Date.now() + CACHE_TTL_MS });
       return tenant;
     }
@@ -245,19 +252,20 @@ async function lookupTenant(userId: string): Promise<TenantInfo | null> {
 
     const memberTenantId = memberRows[0].tenant_id;
     const memberTenantRes = await fetch(
-      `${SUPABASE_URL}/rest/v1/tenants?id=eq.${memberTenantId}&select=subdomain,status&limit=1`,
+      `${SUPABASE_URL}/rest/v1/tenants?id=eq.${memberTenantId}&select=id,user_id,subdomain,status,plan&limit=1`,
       { headers }
     );
     if (!memberTenantRes.ok) {
       console.error(`[cloud-auth] Member tenant lookup failed: ${memberTenantRes.status}`);
       return null;
     }
-    const memberTenantRows = await memberTenantRes.json() as Array<{ subdomain: string; status: string }>;
+    const memberTenantRows = await memberTenantRes.json() as Array<{ id: string; user_id: string; subdomain: string; status: string; plan: string }>;
     if (!memberTenantRows.length || memberTenantRows[0].status !== 'active') {
       return null;
     }
 
-    const tenant = makeTenantInfo(memberTenantRows[0].subdomain, memberTenantRows[0].status);
+    const r = memberTenantRows[0];
+    const tenant = makeTenantInfo(r.id, r.user_id, r.subdomain, r.status, r.plan);
     tenantCache.set(userId, { tenant, expiresAt: Date.now() + CACHE_TTL_MS });
     return tenant;
   } catch (err) {
@@ -386,6 +394,9 @@ async function verifyAndContinue(token: string, req: Request, res: Response, nex
     // Attach to request for downstream use
     (req as any).user = { id: sub, email, tenantId: tenant.subdomain };
     (req as any).tenantDataDir = tenant.dataDir;
+    (req as any).tenantPlan = tenant.plan;
+    (req as any).isOwner = (sub === tenant.ownerId);
+    (req as any).supabaseTenantId = tenant.supabaseTenantId;
 
     next();
   } catch (err: any) {

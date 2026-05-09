@@ -3,6 +3,7 @@ import type {
   PageNode, Asset, Settings, LLMMessage, ChatMessage, Project, LLMProfile, MdTemplate,
   PagesResponse, PageResponse, AssetsResponse, AssetResponse,
   SettingsResponse, SuccessResponse, ProjectsResponse, TemplatesResponse,
+  StorageUsageResponse, WorkspaceMember, WorkspaceMembersResponse, TeamMembersResponse,
 } from '../shared/types.js';
 
 const API_BASE = '/api';
@@ -136,6 +137,18 @@ export const api = {
   getTemplates: () => request<TemplatesResponse>('GET', '/settings/templates'),
   saveTemplate: (t: MdTemplate) => request<SuccessResponse>('PUT', '/settings/templates', t),
   deleteTemplate: (id: string) => request<SuccessResponse>('DELETE', `/settings/templates/${id}`),
+
+  // ── Storage ────────────────────────────────────────────────────────────────
+  getStorageUsage: () => request<StorageUsageResponse>('GET', '/storage/usage'),
+
+  // ── Workspace access (plus plan, owner only) ───────────────────────────────
+  getTeamMembers: () => request<TeamMembersResponse>('GET', '/me/team'),
+  getWorkspaceMembers: (projectId: string) =>
+    request<WorkspaceMembersResponse>('GET', `/projects/${projectId}/access`),
+  grantWorkspaceAccess: (projectId: string, members: Omit<WorkspaceMember, 'granted_at'>[]) =>
+    request<SuccessResponse>('POST', `/projects/${projectId}/access`, members),
+  revokeWorkspaceAccess: (projectId: string, userId: string) =>
+    request<SuccessResponse>('DELETE', `/projects/${projectId}/access/${userId}`),
 
   // ── Move ───────────────────────────────────────────────────────────────────
   movePage: (id: string, targetParentId: string | null) =>

@@ -20,6 +20,16 @@ function createGlobalDb(dbDir: string): Database.Database {
       key   TEXT PRIMARY KEY,
       value TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS workspace_access (
+      id         TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      user_id    TEXT NOT NULL,
+      user_email TEXT NOT NULL,
+      role       TEXT NOT NULL CHECK(role IN ('read','write')),
+      granted_at TEXT NOT NULL,
+      UNIQUE(project_id, user_id)
+    );
   `);
   // Seed defaults
   const insertSetting = db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`);

@@ -97,6 +97,8 @@
           Folder
         </button>
       </div>
+      <div class="sidebar-storage" id="sidebar-storage" style="display:none"></div>
+
       <div class="sidebar-user-row" id="sidebar-user-row" style="display:none">
         <div class="sidebar-user-info">
           <span class="sidebar-user-email" id="sidebar-user-email"></span>
@@ -403,6 +405,29 @@
       <div class="modal-actions">
         <button class="btn btn-ghost" onclick="closeRenameProjectModal()">Cancel</button>
         <button class="btn btn-primary" onclick="submitRenameProject()">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Workspace Members Modal (plus plan, owner only) -->
+  <div class="modal-overlay" id="workspace-members-overlay">
+    <div class="modal" style="width:480px">
+      <div class="modal-title">
+        <span id="workspace-members-title">Manage access</span>
+        <button class="modal-close" onclick="closeWorkspaceMembersModal()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M 6 6 L 18 18"/><path d="M 6 18 L 18 6"/>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div id="workspace-members-list" class="workspace-members-list"></div>
+        <div class="workspace-members-divider"></div>
+        <div id="wm-picker-wrap"></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="closeWorkspaceMembersModal()">Close</button>
+        <button class="btn btn-primary" onclick="submitGrantWorkspaceAccess()">Grant access</button>
       </div>
     </div>
   </div>

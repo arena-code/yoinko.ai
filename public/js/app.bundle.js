@@ -82,6 +82,13 @@ var NotasApp = (() => {
     getTemplates: () => request("GET", "/settings/templates"),
     saveTemplate: (t) => request("PUT", "/settings/templates", t),
     deleteTemplate: (id) => request("DELETE", `/settings/templates/${id}`),
+    // ── Storage ────────────────────────────────────────────────────────────────
+    getStorageUsage: () => request("GET", "/storage/usage"),
+    // ── Workspace access (plus plan, owner only) ───────────────────────────────
+    getTeamMembers: () => request("GET", "/me/team"),
+    getWorkspaceMembers: (projectId) => request("GET", `/projects/${projectId}/access`),
+    grantWorkspaceAccess: (projectId, members) => request("POST", `/projects/${projectId}/access`, members),
+    revokeWorkspaceAccess: (projectId, userId) => request("DELETE", `/projects/${projectId}/access/${userId}`),
     // ── Move ───────────────────────────────────────────────────────────────────
     movePage: (id, targetParentId) => request("PUT", `/pages/${id}/move`, { target_parent_id: targetParentId }),
     moveAsset: (id, targetPageId) => request("PATCH", `/assets/${id}`, { page_id: targetPageId }),
@@ -151,7 +158,10 @@ var NotasApp = (() => {
     wysiwyg: null,
     aiEnabled: false,
     openTabs: [],
-    activeTabId: null
+    activeTabId: null,
+    isCloud: false,
+    isOwner: true,
+    userPlan: "basic"
   };
   var $ = (id) => document.getElementById(id);
   var $$ = (sel) => document.querySelectorAll(sel);
@@ -220,6 +230,12 @@ var NotasApp = (() => {
     window.removeProjectLogo = removeProjectLogo;
     window.closeRenameProjectModal = closeRenameProjectModal;
     window.submitRenameProject = submitRenameProject;
+    window.openWorkspaceMembersModal = openWorkspaceMembersModal;
+    window.closeWorkspaceMembersModal = closeWorkspaceMembersModal;
+    window.revokeWorkspaceMember = revokeWorkspaceMember;
+    window.submitGrantWorkspaceAccess = submitGrantWorkspaceAccess;
+    window.toggleWmPicker = toggleWmPicker;
+    window.onWmPickerChange = onWmPickerChange;
     window.addNewProfile = addNewProfile;
     window.deleteCurrentProfile = deleteCurrentProfile;
     window.confirmDeleteProfile = confirmDeleteProfile;
@@ -257,6 +273,7 @@ var NotasApp = (() => {
       const healthRes = await fetch("/api/health");
       const health = await healthRes.json();
       if (health.cloud) {
+        state.isCloud = true;
         const userRow = document.getElementById("sidebar-user-row");
         if (userRow) userRow.style.display = "";
         try {
@@ -267,9 +284,17 @@ var NotasApp = (() => {
             const tenantEl = document.getElementById("sidebar-user-tenant");
             if (emailEl && me.user.email) emailEl.textContent = me.user.email;
             if (tenantEl && me.user.tenantId) tenantEl.textContent = me.user.tenantId + ".yoinko.ai";
+            state.isOwner = me.user.isOwner ?? true;
+            state.userPlan = me.user.plan ?? "basic";
+            const isPlus = state.userPlan.toLowerCase().includes("plus") || state.userPlan.toLowerCase().includes("pro");
+            if (isPlus) {
+              window.__yoinkoWorkspaceLimit = Infinity;
+            }
+            renderProjectSwitcher();
           }
         } catch {
         }
+        await loadStorageUsage();
       }
     } catch {
     }
@@ -282,7 +307,7 @@ var NotasApp = (() => {
       state.projects = projects;
       const stored = getCurrentProjectId();
       if (!projects.find((p) => p.id === stored)) {
-        setCurrentProjectId("default");
+        setCurrentProjectId(projects[0]?.id ?? "default");
       }
       renderProjectSwitcher();
     } catch {
@@ -330,12 +355,20 @@ var NotasApp = (() => {
              data-project-id="${p.id}"
              onclick="switchProject('${p.id}')"
              onkeydown="if(event.key==='Enter'||event.key===' ')switchProject('${p.id}')">
-          <span class="project-menu-drag-handle" aria-hidden="true" title="Drag to reorder">
+          ${state.isOwner ? `<span class="project-menu-drag-handle" aria-hidden="true" title="Drag to reorder">
             <svg viewBox="0 0 12 12" width="10" height="10" fill="currentColor"><circle cx="3" cy="3" r="1.2"/><circle cx="9" cy="3" r="1.2"/><circle cx="3" cy="6" r="1.2"/><circle cx="9" cy="6" r="1.2"/><circle cx="3" cy="9" r="1.2"/><circle cx="9" cy="9" r="1.2"/></svg>
-          </span>
+          </span>` : ""}
           <span class="project-menu-avatar${p.logo ? " has-logo" : ""}" ${p.logo ? "" : avatarStyle(p.name, p.id === "default")}>${avatarMarkup(p)}</span>
           <span class="project-menu-item-name">${esc(p.name)}</span>
-          <span class="project-menu-actions">
+          ${state.isOwner ? `<span class="project-menu-actions">
+                 ${state.isCloud && (state.userPlan.toLowerCase().includes("plus") || state.userPlan.toLowerCase().includes("pro")) ? `<button class="project-menu-action-btn"
+                           onclick="event.stopPropagation();openWorkspaceMembersModal('${p.id}','${esc(p.name)}')"
+                           title="Manage access">
+                       <svg viewBox="0 0 12 12" fill="none" width="11" height="11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                         <circle cx="4" cy="3.5" r="1.8"/><path d="M0.5 10.5c0-2 1.6-3 3.5-3s3.5 1 3.5 3"/>
+                         <circle cx="9" cy="3.5" r="1.5"/><path d="M9 7.5c1.5 0 2.5.8 2.5 2.5"/>
+                       </svg>
+                     </button>` : ""}
                  <button class="project-menu-action-btn"
                          onclick="event.stopPropagation();openRenameProjectModal('${p.id}','${p.name}')"
                          title="Edit workspace">
@@ -350,17 +383,20 @@ var NotasApp = (() => {
                      <line x1="1" y1="1" x2="9" y2="9"/><line x1="9" y1="1" x2="1" y2="9"/>
                    </svg>
                  </button>` : ""}
-               </span>
+               </span>` : ""}
         </div>`;
     }).join("")}
       <div class="project-menu-divider"></div>
-      <div class="project-menu-item project-menu-new"
-           role="button" tabindex="0"
-           onclick="openCreateProjectModal()"
-           onkeydown="if(event.key==='Enter')openCreateProjectModal()">
-        <span class="project-menu-new-icon">+</span>
-        <span>New workspace</span>
-      </div>
+      ${state.isOwner ? state.isCloud && isFinite(getWorkspaceLimit()) && state.projects.length >= getWorkspaceLimit() ? `<div class="project-menu-item project-menu-new project-menu-new--limit" aria-disabled="true">
+               <span class="project-menu-new-icon">+</span>
+               <span>New workspace <span class="project-menu-limit-badge">${state.projects.length}/${getWorkspaceLimit()}</span></span>
+             </div>` : `<div class="project-menu-item project-menu-new"
+                 role="button" tabindex="0"
+                 onclick="openCreateProjectModal()"
+                 onkeydown="if(event.key==='Enter')openCreateProjectModal()">
+               <span class="project-menu-new-icon">+</span>
+               <span>New workspace</span>
+             </div>` : ""}
     </div>
   `;
     if (wasMenuOpen) {
@@ -462,7 +498,16 @@ var NotasApp = (() => {
     }
     showToast(`Switched to ${state.projects.find((p) => p.id === id)?.name ?? id}`);
   }
+  var CLOUD_WORKSPACE_LIMIT = 2;
+  function getWorkspaceLimit() {
+    return window.__yoinkoWorkspaceLimit ?? CLOUD_WORKSPACE_LIMIT;
+  }
   function openCreateProjectModal() {
+    const wsLimit = getWorkspaceLimit();
+    if (state.isCloud && isFinite(wsLimit) && state.projects.length >= wsLimit) {
+      showToast(`Your plan allows up to ${wsLimit} workspaces.`, "error");
+      return;
+    }
     document.getElementById("project-menu")?.classList.remove("open");
     const overlay = document.getElementById("create-project-overlay");
     if (overlay) overlay.classList.add("open");
@@ -598,6 +643,153 @@ var NotasApp = (() => {
       renderProjectSwitcher();
       closeRenameProjectModal();
       showToast(`Renamed to "${name}"`);
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  }
+  var _workspaceMembersProjectId = null;
+  var _teamMembers = [];
+  var _selectedNewMembers = /* @__PURE__ */ new Set();
+  async function openWorkspaceMembersModal(id, name) {
+    _workspaceMembersProjectId = id;
+    _selectedNewMembers.clear();
+    const titleEl = document.getElementById("workspace-members-title");
+    if (titleEl) titleEl.textContent = `Manage access \u2014 ${name}`;
+    document.getElementById("workspace-members-overlay")?.classList.add("open");
+    const listEl = document.getElementById("workspace-members-list");
+    const pickerWrap = document.getElementById("wm-picker-wrap");
+    if (listEl) listEl.innerHTML = '<div class="workspace-members-loading"><span class="wm-spinner"></span>Loading\u2026</div>';
+    if (pickerWrap) pickerWrap.innerHTML = "";
+    const [teamRes, accessRes] = await Promise.allSettled([
+      api.getTeamMembers(),
+      api.getWorkspaceMembers(id)
+    ]);
+    _teamMembers = teamRes.status === "fulfilled" ? teamRes.value.members : [];
+    const granted = accessRes.status === "fulfilled" ? accessRes.value.members : [];
+    renderWorkspaceMembers(granted);
+    renderTeamMemberPicker(granted);
+  }
+  function closeWorkspaceMembersModal() {
+    document.getElementById("workspace-members-overlay")?.classList.remove("open");
+    closeWmPicker();
+    _workspaceMembersProjectId = null;
+    _selectedNewMembers.clear();
+  }
+  function renderWorkspaceMembers(members) {
+    const listEl = document.getElementById("workspace-members-list");
+    if (!listEl) return;
+    if (members.length === 0) {
+      listEl.innerHTML = '<div class="workspace-members-empty">No members have access yet.</div>';
+      return;
+    }
+    listEl.innerHTML = members.map((m) => `
+    <div class="workspace-member-row">
+      <span class="workspace-member-email">${escapeHtml(m.user_email)}</span>
+      <span class="workspace-member-role workspace-member-role--${m.role}">${m.role}</span>
+      <button class="workspace-member-revoke icon-btn"
+              onclick="revokeWorkspaceMember('${escapeHtml(m.user_id)}')"
+              title="Revoke access">
+        <svg viewBox="0 0 10 10" fill="none" width="10" height="10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+          <line x1="1" y1="1" x2="9" y2="9"/><line x1="9" y1="1" x2="1" y2="9"/>
+        </svg>
+      </button>
+    </div>`).join("");
+  }
+  function renderTeamMemberPicker(alreadyGranted) {
+    const grantedIds = new Set(alreadyGranted.map((m) => m.user_id));
+    const available = _teamMembers.filter((m) => !grantedIds.has(m.user_id));
+    const pickerWrap = document.getElementById("wm-picker-wrap");
+    if (!pickerWrap) return;
+    if (available.length === 0) {
+      pickerWrap.innerHTML = '<p class="workspace-members-hint">All team members already have access.</p>';
+      return;
+    }
+    pickerWrap.innerHTML = `
+    <div class="wm-picker" id="wm-picker">
+      <button type="button" class="wm-picker-trigger" id="wm-picker-trigger"
+              onclick="toggleWmPicker()">
+        <span id="wm-picker-label">Select team members\u2026</span>
+        <svg viewBox="0 0 12 12" fill="none" width="10" height="10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4l4 4 4-4"/></svg>
+      </button>
+      <div class="wm-picker-dropdown" id="wm-picker-dropdown">
+        ${available.map((m) => `
+          <label class="wm-picker-option" data-user-id="${escapeHtml(m.user_id)}">
+            <input type="checkbox" class="wm-picker-checkbox"
+                   value="${escapeHtml(m.user_id)}"
+                   data-email="${escapeHtml(m.email)}"
+                   onchange="onWmPickerChange()">
+            <span class="wm-picker-email">${escapeHtml(m.email)}</span>
+          </label>`).join("")}
+      </div>
+    </div>
+    `;
+  }
+  function closeWmPicker() {
+    document.getElementById("wm-picker-dropdown")?.classList.remove("open");
+    document.removeEventListener("mousedown", wmPickerOutsideHandler);
+  }
+  function wmPickerOutsideHandler(e) {
+    const picker = document.getElementById("wm-picker");
+    if (picker && !picker.contains(e.target)) {
+      closeWmPicker();
+    }
+  }
+  function toggleWmPicker() {
+    const dropdown = document.getElementById("wm-picker-dropdown");
+    if (!dropdown) return;
+    const isOpen = dropdown.classList.contains("open");
+    if (isOpen) {
+      closeWmPicker();
+    } else {
+      dropdown.classList.add("open");
+      setTimeout(() => document.addEventListener("mousedown", wmPickerOutsideHandler), 0);
+    }
+  }
+  function onWmPickerChange() {
+    _selectedNewMembers.clear();
+    document.querySelectorAll(".wm-picker-checkbox:checked").forEach((cb) => {
+      _selectedNewMembers.add(cb.value);
+    });
+    const count = _selectedNewMembers.size;
+    const label = document.getElementById("wm-picker-label");
+    if (label) label.textContent = count === 0 ? "Select team members\u2026" : `${count} member${count > 1 ? "s" : ""} selected`;
+  }
+  async function revokeWorkspaceMember(userId) {
+    if (!_workspaceMembersProjectId) return;
+    try {
+      await api.revokeWorkspaceAccess(_workspaceMembersProjectId, userId);
+      const [accessRes] = await Promise.allSettled([api.getWorkspaceMembers(_workspaceMembersProjectId)]);
+      const granted = accessRes.status === "fulfilled" ? accessRes.value.members : [];
+      renderWorkspaceMembers(granted);
+      renderTeamMemberPicker(granted);
+      _selectedNewMembers.clear();
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  }
+  async function submitGrantWorkspaceAccess() {
+    if (!_workspaceMembersProjectId || _selectedNewMembers.size === 0) {
+      showToast("Select at least one member", "error");
+      return;
+    }
+    const role = "write";
+    const entries = Array.from(_selectedNewMembers).map((uid) => {
+      const cb = document.querySelector(`.wm-picker-checkbox[value="${uid}"]`);
+      return { user_id: uid, user_email: cb?.dataset.email ?? "", role };
+    }).filter((e) => e.user_email);
+    if (!entries.length) {
+      showToast("Could not resolve member emails", "error");
+      return;
+    }
+    try {
+      await api.grantWorkspaceAccess(_workspaceMembersProjectId, entries);
+      _selectedNewMembers.clear();
+      document.getElementById("wm-picker-dropdown")?.classList.remove("open");
+      const [accessRes] = await Promise.allSettled([api.getWorkspaceMembers(_workspaceMembersProjectId)]);
+      const granted = accessRes.status === "fulfilled" ? accessRes.value.members : [];
+      renderWorkspaceMembers(granted);
+      renderTeamMemberPicker(granted);
+      showToast(`Access granted to ${entries.length} member${entries.length > 1 ? "s" : ""}`);
     } catch (err) {
       showToast(err.message, "error");
     }
@@ -2260,6 +2452,7 @@ ${nested}`;
       try {
         await api.uploadFiles(form);
         showToast("Uploaded!");
+        loadStorageUsage();
       } catch (err) {
         showToast("Upload failed: " + err.message, "error");
       }
@@ -2290,6 +2483,7 @@ ${nested}`;
     try {
       await api.deleteAsset(assetId);
       showToast("Deleted");
+      loadStorageUsage();
       if (state.currentPageId) await renderPage(state.currentPageId);
     } catch (err) {
       showToast("Delete failed: " + err.message, "error");
@@ -3383,6 +3577,32 @@ ${nested}`;
     } catch {
       showToast("Copy failed", "error");
     }
+  }
+  async function loadStorageUsage() {
+    try {
+      const { usage } = await api.getStorageUsage();
+      if (!usage.isCloud) return;
+      const bar = document.getElementById("sidebar-storage");
+      if (!bar) return;
+      bar.style.display = "";
+      const pct = Math.min(100, usage.used / usage.limit * 100);
+      const warnClass = pct >= 95 ? "danger" : pct >= 80 ? "warn" : "";
+      bar.innerHTML = `
+      <div class="storage-bar-label">
+        <span>Storage</span>
+        <span>${formatBytes(usage.used)} / ${formatBytes(usage.limit)}</span>
+      </div>
+      <div class="storage-bar-track">
+        <div class="storage-bar-fill ${warnClass}" style="width:${pct.toFixed(1)}%"></div>
+      </div>`;
+    } catch {
+    }
+  }
+  function formatBytes(bytes) {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
   }
   var toastTimer;
   function showToast(msg, type = "info") {

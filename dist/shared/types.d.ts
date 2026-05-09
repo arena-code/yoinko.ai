@@ -77,6 +77,20 @@ export interface MdTemplate {
     name: string;
     content: string;
 }
+export interface WorkspaceMember {
+    user_id: string;
+    user_email: string;
+    role: 'read' | 'write';
+    granted_at: string;
+}
+export interface StorageUsage {
+    used: number;
+    limit: number;
+    isCloud: boolean;
+}
+export interface StorageUsageResponse {
+    usage: StorageUsage;
+}
 export interface ProjectsResponse {
     projects: Project[];
 }
@@ -108,5 +122,15 @@ export interface SuccessResponse {
 }
 export interface TemplatesResponse {
     templates: MdTemplate[];
+}
+export interface WorkspaceMembersResponse {
+    members: WorkspaceMember[];
+}
+export interface TeamMember {
+    user_id: string;
+    email: string;
+}
+export interface TeamMembersResponse {
+    members: TeamMember[];
 }
 //# sourceMappingURL=types.d.ts.map

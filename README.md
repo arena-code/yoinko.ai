@@ -58,7 +58,8 @@ yoınko is an AI-native knowledge base that runs on your own machine. You write 
 - **AI chat drawer** — context-aware chat that knows your current page; apply replies directly
 - **AI image generation** — generate images via DALL-E, Imagen, or any compatible endpoint
 - **Bring your own LLM** — OpenAI, Google Gemini, Anthropic Claude, or any OpenAI-compatible endpoint (Ollama, LM Studio, OpenRouter)
-- **Folder tree** — nested folders, drag-free ordering, right-click context menus
+- **Multiple projects** — separate workspaces, each with its own page tree and assets
+- **Folder tree** — nested folders, drag-free ordering, context menus, and live search
 - **Asset management** — upload, preview, and delete files attached to any page
 - **Light & dark mode**
 
@@ -117,7 +118,7 @@ npm start          # production (after npm run build)
 
 ## Configuration
 
-All settings are managed **in-app** via the ⚙️ Settings modal. No config files are required to get started.
+All settings are managed **in-app** via the Settings modal (gear icon in the sidebar). No config files are required to get started.
 
 ### LLM Provider
 
@@ -163,6 +164,8 @@ yoinko.ai/
 │   ├── server/           # backend Node.js/Express
 │   │   ├── index.ts      # server entry point
 │   │   ├── db.ts         # SQLite setup & helpers
+│   │   ├── files.ts      # filesystem page tree (read/write .md and .html files)
+│   │   ├── projects.ts   # multi-project registry
 │   │   ├── ai/
 │   │   │   └── index.ts  # unified LLM adapter (OpenAI / Gemini / Claude)
 │   │   └── routes/
@@ -179,8 +182,12 @@ yoinko.ai/
 │   ├── build-editor.js   # esbuild TipTap bundle
 │   └── watch-client.js   # dev watcher with live-reload SSE
 │
-├── data/                 # runtime data (SQLite DB + uploaded assets)
-│   └── uploads/
+├── data/                 # runtime data — one subdirectory per project
+│   ├── projects.json     # project registry
+│   └── <project-id>/
+│       ├── pages/        # page tree as real .md / .html files on disk
+│       ├── uploads/      # file attachments
+│       └── yoinko.db     # SQLite: assets, chat history
 │
 ├── package.json
 └── tsconfig.json
@@ -213,7 +220,7 @@ yoinko.ai/
 ```
 
 - **No framework.** The client is vanilla TypeScript bundled with esbuild. Fast to load, easy to read.
-- **SQLite for everything.** Pages, folder structure, assets, settings, and chat history all live in a single `data/yoinko.db` file. Easy to backup, easy to migrate.
+- **Filesystem-first pages.** Pages and folders are real `.md` and `.html` files on disk under `data/<project>/pages/`. SQLite is only used for sidecar data: asset metadata, chat history, and settings.
 - **LLM calls are proxied server-side.** Your API key never reaches the browser.
 - **Live reload in dev.** A lightweight SSE channel on port 4568 pushes reloads whenever you save a `.ts`, `.css`, or `.html` file.
 
@@ -325,7 +332,18 @@ Yes. Without a configured provider the AI features (chat, AI sections, image gen
 <details>
 <summary><strong>Where is my data stored?</strong></summary>
 
-Everything lives in `./data/`. The SQLite database is `data/yoinko.db` and uploaded files are in `data/uploads/`. Back it up like any file.
+Everything lives in `./data/`. Each project gets its own subdirectory:
+
+```
+data/
+├── projects.json           # project registry
+└── default/                # your first project (or <project-id>/)
+    ├── pages/              # your notes as .md and .html files on disk
+    ├── uploads/            # file attachments
+    └── yoinko.db           # SQLite: assets, chat history
+```
+
+Back up the entire `data/` directory like any folder — no special tools needed. Your pages are plain text files you can read and edit directly.
 
 </details>
 
@@ -339,7 +357,7 @@ Yes. Choose **OpenAI Compatible** in Settings and set the Base URL to your local
 <details>
 <summary><strong>Can I export my data?</strong></summary>
 
-Your pages are rows in the SQLite DB with plain Markdown/HTML content — readable without any special tooling. You can also copy the entire `data/` directory anywhere.
+Your pages are plain `.md` and `.html` files sitting in `data/<project>/pages/` — open them in any editor, push them to a git repo, or move them anywhere. You can also copy the entire `data/` directory to migrate or back up everything at once.
 
 </details>
 
