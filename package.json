@@ -1,21 +1,25 @@
 {
   "name": "yoinko",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "type": "module",
   "description": "yoınko.ai — fewer buttons. more yoınking.",
-  "main": "dist/index.js",
+  "main": "dist/server/index.js",
   "scripts": {
     "dev": "concurrently --names \"server,watch\" --prefix-colors \"cyan,magenta\" \"tsx watch --env-file=.env src/server/index.ts\" \"node scripts/watch-client.js\"",
-    "start": "node dist/index.js",
+    "start": "node dist/server/index.js",
     "build": "npm run build:server && npm run build:client && npm run build:editor",
     "build:server": "tsc -p tsconfig.server.json",
     "build:client": "node scripts/build-client.js",
+    "build:client:sourcemaps": "SOURCEMAP=true NODE_ENV=production node scripts/build-client.js",
     "build:editor": "node scripts/build-editor.js",
-    "typecheck": "tsc --noEmit -p tsconfig.server.json && tsc --noEmit -p tsconfig.client.json"
+    "typecheck": "tsc --noEmit -p tsconfig.server.json && tsc --noEmit -p tsconfig.client.json",
+    "glitchtip:sourcemaps:inject": "glitchtip-cli sourcemaps inject ./public/js && glitchtip-cli sourcemaps inject ./dist",
+    "glitchtip:sourcemaps:upload": "glitchtip-cli sourcemaps upload ./public/js --org \"$GLITCHTIP_ORG\" --project \"$GLITCHTIP_PROJECT\" && glitchtip-cli sourcemaps upload ./dist --org \"$GLITCHTIP_ORG\" --project \"$GLITCHTIP_PROJECT\""
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@google/generative-ai": "^0.24.0",
+    "@sentry/browser": "^10.53.1",
     "@tiptap/core": "^3.22.4",
     "@tiptap/extension-placeholder": "^3.22.4",
     "@tiptap/extension-table": "^3.22.4",

@@ -30,6 +30,33 @@ function createGlobalDb(dbDir: string): Database.Database {
       granted_at TEXT NOT NULL,
       UNIQUE(project_id, user_id)
     );
+
+    CREATE TABLE IF NOT EXISTS page_shares (
+      token         TEXT PRIMARY KEY,
+      project_id    TEXT NOT NULL,
+      page_id       TEXT NOT NULL,
+      page_path     TEXT NOT NULL,
+      password_hash TEXT,
+      password_salt TEXT,
+      created_at    TEXT NOT NULL,
+      updated_at    TEXT NOT NULL,
+      UNIQUE(project_id, page_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_page_shares_token ON page_shares(token);
+
+    CREATE TABLE IF NOT EXISTS asset_shares (
+      token         TEXT PRIMARY KEY,
+      project_id    TEXT NOT NULL,
+      asset_id      TEXT NOT NULL,
+      password_hash TEXT,
+      password_salt TEXT,
+      created_at    TEXT NOT NULL,
+      updated_at    TEXT NOT NULL,
+      UNIQUE(project_id, asset_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_asset_shares_token ON asset_shares(token);
   `);
   // Seed defaults
   const insertSetting = db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`);

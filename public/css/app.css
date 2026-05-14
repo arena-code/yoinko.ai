@@ -1213,6 +1213,33 @@ mark.find-highlight-active {
   font-weight: 500;
 }
 
+.published-badge {
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 21px;
+  padding: 3px 8px;
+  border: 1.5px solid rgba(47, 139, 87, 0.34);
+  border-radius: 999px;
+  background: #ecfdf3;
+  color: #176b3f;
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.published-badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #2f8b57;
+  box-shadow: 0 0 0 3px rgba(47, 139, 87, 0.14);
+  flex-shrink: 0;
+}
+
 /* ── Asset grid ─────────────────────────────────────────────── */
 .assets-section {
   margin-top: 40px;
@@ -1438,6 +1465,11 @@ mark.find-highlight-active {
   color: var(--text-dim);
   margin-top: 2px;
   letter-spacing: 0.03em;
+}
+
+.file-asset-info .published-badge,
+.asset-info .published-badge {
+  margin-top: 7px;
 }
 
 /* ════════════════════════════════════════════════════════════════════════════
@@ -2517,6 +2549,130 @@ mark.find-highlight-active {
   line-height: 1.5;
 }
 
+.share-page-modal {
+  width: 520px;
+}
+
+.share-modal-status {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 42px;
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  border: 2px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.share-modal-status::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  box-shadow: 0 0 0 3px rgba(26, 26, 46, 0.08);
+  flex-shrink: 0;
+}
+
+.share-modal-status.loading::before {
+  background: var(--mustard);
+}
+
+.share-modal-status.published {
+  border-color: rgba(47, 139, 87, 0.28);
+  background: var(--success-bg);
+  color: #245f40;
+}
+
+.share-modal-status.published::before {
+  background: var(--success);
+  box-shadow: 0 0 0 3px rgba(47, 139, 87, 0.14);
+}
+
+.share-modal-status.error {
+  border-color: rgba(194, 52, 52, 0.32);
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.share-modal-status.error::before {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px rgba(194, 52, 52, 0.14);
+}
+
+.share-link-group {
+  margin-bottom: 14px;
+}
+
+.share-link-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.share-link-row .form-input {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  background: #fffdf8;
+}
+
+.share-password-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0 14px;
+  padding: 12px;
+  border: 2px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: white;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.share-password-toggle input {
+  width: 17px;
+  height: 17px;
+  accent-color: var(--tomato);
+  flex-shrink: 0;
+}
+
+.share-modal-note {
+  margin-top: 2px;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.share-page-modal .modal-actions {
+  justify-content: space-between;
+  align-items: center;
+}
+
+@media (max-width: 560px) {
+  .share-link-row,
+  .share-page-modal .modal-actions {
+    grid-template-columns: 1fr;
+    display: grid;
+  }
+
+  .share-page-modal .modal-actions > div {
+    justify-content: stretch;
+  }
+
+  .share-page-modal .modal-actions .btn {
+    justify-content: center;
+  }
+}
+
 .type-selector {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -2774,6 +2930,19 @@ mark.find-highlight-active {
   background: var(--tomato-dark);
   border-color: var(--ink);
   color: white;
+}
+
+.btn-published-attention {
+  background: #ecfdf3;
+  color: #176b3f;
+  border-color: #2f8b57;
+  box-shadow: 2px 2px 0 rgba(47, 139, 87, 0.45);
+}
+.btn-published-attention:hover {
+  background: #dff7e8;
+  border-color: #176b3f;
+  color: #124f30;
+  box-shadow: 3px 3px 0 rgba(47, 139, 87, 0.55);
 }
 
 .btn:disabled {

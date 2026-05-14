@@ -1,5 +1,6 @@
 // Watch client TS + CSS/HTML, trigger live-reload in browser via SSE.
 import { context } from 'esbuild';
+import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { createServer } from 'http';
@@ -7,6 +8,9 @@ import chokidar from 'chokidar';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
+const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+const release = process.env.SENTRY_RELEASE || process.env.GLITCHTIP_RELEASE || `yoinko@${pkg.version}`;
+const environment = process.env.SENTRY_ENVIRONMENT || process.env.GLITCHTIP_ENVIRONMENT || process.env.NODE_ENV || 'development';
 
 // ── SSE live-reload server on port 4568 ──────────────────────────────────────
 const clients = new Set();
@@ -45,6 +49,10 @@ const ctx = await context({
   outfile: join(root, 'public/js/app.bundle.js'),
   sourcemap: true,
   target: ['esnext'],
+  define: {
+    __YOINKO_RELEASE__: JSON.stringify(release),
+    __YOINKO_ENVIRONMENT__: JSON.stringify(environment),
+  },
   logLevel: 'silent',
   plugins: [{
     name: 'reload-on-build',

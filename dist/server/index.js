@@ -10,6 +10,7 @@ import settingsRouter from './routes/settings.js';
 import projectsRouter from './routes/projects.js';
 import storageRouter from './routes/storage.js';
 import authRouter from './routes/auth.js';
+import shareRouter from './routes/share.js';
 import { migrateOnStartup } from './projects.js';
 import { cloudAuth, invalidateTenantCache } from './middleware/cloud-auth.js';
 import { workspaceAccessCheck } from './middleware/workspace-auth.js';
@@ -33,6 +34,8 @@ app.use(express.static(publicDir, { index: false }));
 if (CLOUD_ENABLED) {
     app.use('/auth', authRouter);
 }
+// ── Public read-only shares (must bypass cloudAuth) ───────────────────────────
+app.use('/share', shareRouter);
 // ── Admin endpoint: cache invalidation (before cloudAuth, shared-secret auth) ─
 // The website calls this when it removes a member or revokes access so the
 // notes app's tenant cache is busted immediately instead of waiting for TTL.

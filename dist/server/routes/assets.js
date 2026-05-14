@@ -4,13 +4,23 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
-import { getProjectDb } from '../db.js';
+import { getGlobalDb, getProjectDb } from '../db.js';
 import { getProjectDirs, listProjects } from '../projects.js';
 import { projectId, dataDir } from '../request-helpers.js';
 import { getTenantUsedBytes, getStorageLimit } from '../storage.js';
+import { deleteAssetShare, getAssetShare, hashSharePassword, shareInfoFromRecord, upsertAssetShare, } from '../share-service.js';
 const CLOUD_ENABLED = process.env.YOINKO_CLOUD === 'true';
 const router = express.Router();
 const now = () => new Date().toISOString();
+function assetShareUrl(req, token) {
+    const forwardedProto = req.headers['x-forwarded-proto']?.split(',')[0]?.trim();
+    const protocol = forwardedProto || req.protocol;
+    const host = req.get('host') || 'localhost';
+    return `${protocol}://${host}/share/assets/${token}`;
+}
+function findProjectAsset(projectDb, assetId) {
+    return projectDb.prepare(`SELECT * FROM assets WHERE id = ?`).get(assetId);
+}
 // Dynamic multer storage — destination resolved per-request from X-Project-Id
 const storage = multer.diskStorage({
     destination: (req, _file, cb) => {
@@ -134,11 +144,79 @@ router.get('/', (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+// ── GET /api/assets/:id/share — current public share settings ───────────────
+router.get('/:id/share', (req, res) => {
+    try {
+        const pid = projectId(req);
+        const dd = dataDir(req);
+        const assetId = req.params.id;
+        const projectDb = getProjectDb(pid, dd);
+        const asset = findProjectAsset(projectDb, assetId);
+        if (!asset)
+            return void res.status(404).json({ error: 'Asset not found' });
+        const db = getGlobalDb(dd);
+        const share = getAssetShare(db, pid, asset.id);
+        res.json({ share: shareInfoFromRecord(share, share ? assetShareUrl(req, share.token) : undefined) });
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+// ── PUT /api/assets/:id/share — publish/update public read-only asset ───────
+router.put('/:id/share', (req, res) => {
+    try {
+        const pid = projectId(req);
+        const dd = dataDir(req);
+        const assetId = req.params.id;
+        const projectDb = getProjectDb(pid, dd);
+        const asset = findProjectAsset(projectDb, assetId);
+        if (!asset)
+            return void res.status(404).json({ error: 'Asset not found' });
+        const { password_protected, password } = req.body;
+        const db = getGlobalDb(dd);
+        const existing = getAssetShare(db, pid, asset.id);
+        let passwordUpdate;
+        if (password_protected) {
+            const trimmed = typeof password === 'string' ? password.trim() : '';
+            if (trimmed) {
+                passwordUpdate = hashSharePassword(trimmed);
+            }
+            else if (!existing?.password_hash) {
+                return void res.status(400).json({ error: 'Password required to protect this share' });
+            }
+        }
+        else {
+            passwordUpdate = { hash: null, salt: null };
+        }
+        const share = upsertAssetShare(db, pid, asset.id, passwordUpdate);
+        res.json({ share: shareInfoFromRecord(share, assetShareUrl(req, share.token)) });
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+// ── DELETE /api/assets/:id/share — unpublish asset ──────────────────────────
+router.delete('/:id/share', (req, res) => {
+    try {
+        const pid = projectId(req);
+        const dd = dataDir(req);
+        const assetId = req.params.id;
+        const projectDb = getProjectDb(pid, dd);
+        const asset = findProjectAsset(projectDb, assetId);
+        if (!asset)
+            return void res.status(404).json({ error: 'Asset not found' });
+        deleteAssetShare(getGlobalDb(dd), pid, asset.id);
+        res.json({ share: { enabled: false } });
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
 // ── GET /api/assets/:id ───────────────────────────────────────────────────────
 router.get('/:id', (req, res) => {
     try {
         const db = getProjectDb(projectId(req), dataDir(req));
-        const asset = db.prepare(`SELECT * FROM assets WHERE id = ?`).get(req.params.id);
+        const asset = findProjectAsset(db, req.params.id);
         if (!asset)
             return void res.status(404).json({ error: 'Asset not found' });
         res.json({ asset: { ...asset, url: `/api/assets/${asset.id}/file` } });
@@ -183,7 +261,7 @@ router.put('/:id/content', (req, res) => {
         const dd = dataDir(req);
         const db = getProjectDb(pid, dd);
         const { uploadsDir } = getProjectDirs(pid, dd);
-        const asset = db.prepare(`SELECT * FROM assets WHERE id = ?`).get(req.params.id);
+        const asset = findProjectAsset(db, req.params.id);
         if (!asset)
             return void res.status(404).json({ error: 'Asset not found' });
         const { content } = req.body;
@@ -226,6 +304,7 @@ router.delete('/:id', (req, res) => {
         if (fs.existsSync(filePath))
             fs.unlinkSync(filePath);
         db.prepare(`DELETE FROM assets WHERE id = ?`).run(req.params.id);
+        deleteAssetShare(getGlobalDb(dd), pid, asset.id);
         res.json({ success: true });
     }
     catch (err) {

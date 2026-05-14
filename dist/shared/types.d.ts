@@ -21,6 +21,15 @@ export interface PageNode {
     assets?: Asset[];
     locked?: boolean;
     priority_todos?: PriorityTodo[];
+    share?: PageShareInfo;
+}
+export interface PageShareInfo {
+    enabled: boolean;
+    token?: string;
+    url?: string;
+    password_protected?: boolean;
+    created_at?: string;
+    updated_at?: string;
 }
 export type Priority = 'low' | 'medium' | 'high';
 export interface PriorityTodo {
@@ -38,6 +47,7 @@ export interface Asset {
     size: number;
     created_at: string;
     url: string;
+    share?: PageShareInfo;
 }
 export interface Settings {
     theme: 'dark' | 'light';
@@ -108,6 +118,12 @@ export interface PagesResponse {
 }
 export interface PageResponse {
     page: PageNode;
+}
+export interface PageShareResponse {
+    share: PageShareInfo;
+}
+export interface AssetShareResponse {
+    share: PageShareInfo;
 }
 export interface AssetsResponse {
     assets: Asset[];

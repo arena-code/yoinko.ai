@@ -2,12 +2,25 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
-import { getProjectDb } from '../db.js';
+import { getGlobalDb, getProjectDb } from '../db.js';
 import { getPagesDir } from '../files.js';
 import { scanDir, flattenTree, readPage, writePage, createPage, createFolder, deletePath, renamePath, toId, fromId, extensionForFileType, pageFileType, isPageLocked, setPageLocked, readFolderTodos, writeFolderTodos, } from '../files.js';
+import { deletePageShare, deletePageSharesForIds, getAssetShare, getPageShare, hashSharePassword, shareInfoFromRecord, updatePageSharePathPrefix, updatePageShareReference, upsertPageShare, } from '../share-service.js';
 import { canCreateFolderInParent, canMovePageToParent } from '../../shared/page-depth.js';
 import { projectId, dataDir } from '../request-helpers.js';
 const router = express.Router();
+function shareUrl(req, token) {
+    const forwardedProto = req.headers['x-forwarded-proto']?.split(',')[0]?.trim();
+    const protocol = forwardedProto || req.protocol;
+    const host = req.get('host') || 'localhost';
+    return `${protocol}://${host}/share/${token}`;
+}
+function assetShareUrl(req, token) {
+    const forwardedProto = req.headers['x-forwarded-proto']?.split(',')[0]?.trim();
+    const protocol = forwardedProto || req.protocol;
+    const host = req.get('host') || 'localhost';
+    return `${protocol}://${host}/share/assets/${token}`;
+}
 // ── GET /api/pages — full tree ────────────────────────────────────────────────
 router.get('/', (req, res) => {
     try {
@@ -53,10 +66,20 @@ router.get('/:id', (req, res) => {
             }
             page.locked = isPageLocked(pagesDir, relPath);
         }
+        const shareDb = getGlobalDb(dd);
+        if (page.type === 'page') {
+            const share = getPageShare(shareDb, pid, page.id);
+            page.share = shareInfoFromRecord(share, share ? shareUrl(req, share.token) : undefined);
+        }
         if (page.type === 'folder') {
             page.children = flat.filter(p => p.parent_id === page.id).map(child => {
                 const assetCount = (db.prepare(`SELECT COUNT(*) as cnt FROM assets WHERE page_id = ?`).get(child.id))?.cnt ?? 0;
-                return { ...child, asset_count: assetCount };
+                const share = child.type === 'page' ? getPageShare(shareDb, pid, child.id) : undefined;
+                return {
+                    ...child,
+                    asset_count: assetCount,
+                    share: shareInfoFromRecord(share, share ? shareUrl(req, share.token) : undefined),
+                };
             });
             try {
                 page.priority_todos = JSON.parse(readFolderTodos(pagesDir, relPath));
@@ -66,8 +89,81 @@ router.get('/:id', (req, res) => {
             }
         }
         const assets = db.prepare(`SELECT * FROM assets WHERE page_id = ? ORDER BY created_at DESC`).all(page.id);
-        page.assets = assets.map(a => ({ ...a, url: `/api/assets/${a.id}/file` }));
+        page.assets = assets.map(a => {
+            const share = getAssetShare(shareDb, pid, a.id);
+            return {
+                ...a,
+                url: `/api/assets/${a.id}/file`,
+                share: shareInfoFromRecord(share, share ? assetShareUrl(req, share.token) : undefined),
+            };
+        });
         res.json({ page });
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+// ── GET /api/pages/:id/share — current public share settings ─────────────────
+router.get('/:id/share', (req, res) => {
+    try {
+        const pid = projectId(req);
+        const pagesDir = getPagesDir(pid, dataDir(req));
+        const flat = flattenTree(scanDir(pagesDir));
+        const page = flat.find(p => p.id === req.params.id);
+        if (!page || page.type !== 'page')
+            return void res.status(404).json({ error: 'Page not found' });
+        const db = getGlobalDb(dataDir(req));
+        const share = getPageShare(db, pid, page.id);
+        res.json({ share: shareInfoFromRecord(share, share ? shareUrl(req, share.token) : undefined) });
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+// ── PUT /api/pages/:id/share — publish/update public read-only share ─────────
+router.put('/:id/share', (req, res) => {
+    try {
+        const pid = projectId(req);
+        const dd = dataDir(req);
+        const pagesDir = getPagesDir(pid, dd);
+        const flat = flattenTree(scanDir(pagesDir));
+        const page = flat.find(p => p.id === req.params.id);
+        if (!page || page.type !== 'page')
+            return void res.status(404).json({ error: 'Page not found' });
+        const { password_protected, password } = req.body;
+        const db = getGlobalDb(dd);
+        const existing = getPageShare(db, pid, page.id);
+        let passwordUpdate;
+        if (password_protected) {
+            const trimmed = typeof password === 'string' ? password.trim() : '';
+            if (trimmed) {
+                passwordUpdate = hashSharePassword(trimmed);
+            }
+            else if (!existing?.password_hash) {
+                return void res.status(400).json({ error: 'Password required to protect this share' });
+            }
+        }
+        else {
+            passwordUpdate = { hash: null, salt: null };
+        }
+        const share = upsertPageShare(db, pid, page.id, page.path, passwordUpdate);
+        res.json({ share: shareInfoFromRecord(share, shareUrl(req, share.token)) });
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+// ── DELETE /api/pages/:id/share — unpublish page ─────────────────────────────
+router.delete('/:id/share', (req, res) => {
+    try {
+        const pid = projectId(req);
+        const pagesDir = getPagesDir(pid, dataDir(req));
+        const flat = flattenTree(scanDir(pagesDir));
+        const page = flat.find(p => p.id === req.params.id);
+        if (!page || page.type !== 'page')
+            return void res.status(404).json({ error: 'Page not found' });
+        deletePageShare(getGlobalDb(dataDir(req)), pid, page.id);
+        res.json({ share: { enabled: false } });
     }
     catch (err) {
         res.status(500).json({ error: err.message });
@@ -116,7 +212,8 @@ router.post('/', (req, res) => {
 router.put('/:id', (req, res) => {
     try {
         const pid = projectId(req);
-        const pagesDir = getPagesDir(pid, dataDir(req));
+        const dd = dataDir(req);
+        const pagesDir = getPagesDir(pid, dd);
         const relPath = fromId(req.params.id);
         const { content, name } = req.body;
         if (isPageLocked(pagesDir, relPath)) {
@@ -127,11 +224,13 @@ router.put('/:id', (req, res) => {
             const newFileName = existingFileType ? `${name}.${extensionForFileType(existingFileType)}` : name;
             const newRelPath = renamePath(pagesDir, relPath, newFileName);
             const newId = toId(newRelPath);
+            const shareDb = getGlobalDb(dd);
             // If this is a folder rename (no extension), migrate asset page_ids:
             //   Case 1: assets attached directly to the renamed folder (page_id === oldId)
             //   Case 2: assets attached to pages/subfolders inside the renamed folder
             if (!existingFileType) {
-                const db = getProjectDb(pid, dataDir(req));
+                updatePageSharePathPrefix(shareDb, pid, relPath + '/', newRelPath + '/');
+                const db = getProjectDb(pid, dd);
                 const oldId = toId(relPath);
                 const oldPrefix = relPath + '/'; // e.g. "01 - Branding/"
                 const newPrefix = newRelPath + '/'; // e.g. "Branding/"
@@ -156,6 +255,9 @@ router.put('/:id', (req, res) => {
                     }
                     catch { /* skip malformed ids */ }
                 }
+            }
+            else {
+                updatePageShareReference(shareDb, pid, req.params.id, newId, newRelPath);
             }
             const flat = flattenTree(scanDir(pagesDir));
             const page = flat.find(p => p.id === newId);
@@ -224,12 +326,18 @@ router.put('/:id/todos', (req, res) => {
 router.delete('/:id', (req, res) => {
     try {
         const pid = projectId(req);
-        const pagesDir = getPagesDir(pid, dataDir(req));
+        const dd = dataDir(req);
+        const pagesDir = getPagesDir(pid, dd);
         const relPath = fromId(req.params.id);
         if (isPageLocked(pagesDir, relPath)) {
             return void res.status(423).json({ error: 'File is locked' });
         }
+        const flat = flattenTree(scanDir(pagesDir));
+        const pageIdsToDelete = flat
+            .filter(p => p.path === relPath || p.path.startsWith(relPath + '/'))
+            .map(p => p.id);
         deletePath(pagesDir, relPath);
+        deletePageSharesForIds(getGlobalDb(dd), pid, pageIdsToDelete);
         res.json({ success: true });
     }
     catch (err) {
@@ -276,11 +384,13 @@ router.put('/:id/move', (req, res) => {
         // Migrate asset page_ids if this is a folder move
         const isFolder = fs.statSync(dstAbs).isDirectory();
         const db = getProjectDb(pid, dd);
+        const shareDb = getGlobalDb(dd);
         if (isFolder) {
             const oldId = toId(relPath); // base64url of the folder itself
             const newId = toId(newRelPath);
             const oldPrefix = relPath + '/'; // sub-page prefix (with trailing slash)
             const newPrefix = newRelPath + '/';
+            updatePageSharePathPrefix(shareDb, pid, oldPrefix, newPrefix);
             const allAssets = db.prepare(`SELECT id, page_id FROM assets WHERE page_id IS NOT NULL`).all();
             const updateStmt = db.prepare(`UPDATE assets SET page_id = ? WHERE id = ?`);
             for (const asset of allAssets) {
@@ -307,6 +417,7 @@ router.put('/:id/move', (req, res) => {
             const oldId = toId(relPath);
             const newId = toId(newRelPath);
             db.prepare(`UPDATE assets SET page_id = ? WHERE page_id = ?`).run(newId, oldId);
+            updatePageShareReference(shareDb, pid, oldId, newId, newRelPath);
         }
         const flat = flattenTree(scanDir(pagesDir));
         const newId = toId(newRelPath);

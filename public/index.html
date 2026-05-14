@@ -149,6 +149,9 @@
           <button class="btn btn-sm btn-ghost hidden" id="lock-page-btn" title="Lock page" onclick="togglePageLock()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;display:inline-block;vertical-align:-2px;margin-right:4px"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M 8 11 V 8 a 4 4 0 0 1 8 0 v3"/></svg>Lock
           </button>
+          <button class="btn btn-sm btn-ghost hidden" id="share-page-btn" title="Share read-only page" onclick="openPageShareModal()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;display:inline-block;vertical-align:-2px;margin-right:4px"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M 8.6 10.6 L 15.4 6.4"/><path d="M 8.6 13.4 L 15.4 17.6"/></svg>Share
+          </button>
           <span class="topbar-badge" id="topbar-badge"></span>
         </div>
       </div>
@@ -699,6 +702,44 @@
   <div class="toast" id="toast">
     <div class="toast-dot"></div>
     <span class="toast-text"></span>
+  </div>
+
+  <!-- Share Page Modal -->
+  <div class="modal-overlay" id="share-page-overlay">
+    <div class="modal share-page-modal" style="max-width:520px">
+      <div class="modal-title">
+        <span id="share-modal-title-text">Share page</span>
+        <button class="modal-close" onclick="closePageShareModal()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M 6 6 L 18 18"/><path d="M 6 18 L 18 6"/>
+          </svg>
+        </button>
+      </div>
+      <div class="share-modal-status" id="share-modal-status">Loading…</div>
+      <div class="form-group share-link-group" id="share-link-group" style="display:none">
+        <label class="form-label" id="share-link-label" for="share-page-url">Read-only link</label>
+        <div class="share-link-row">
+          <input class="form-input" id="share-page-url" type="url" readonly>
+          <button class="btn btn-ghost btn-sm" onclick="copyCurrentShareLink()">Copy</button>
+        </div>
+      </div>
+      <label class="share-password-toggle">
+        <input id="share-password-enabled" type="checkbox" onchange="syncSharePasswordUI()">
+        <span id="share-password-label">Password protect this shared page</span>
+      </label>
+      <div class="form-group" id="share-password-group" style="display:none">
+        <label class="form-label" for="share-page-password">Password</label>
+        <input class="form-input" id="share-page-password" type="password" autocomplete="new-password" placeholder="Set or replace password">
+      </div>
+      <div class="share-modal-note" id="share-modal-note">Shared pages are always read-only. Anyone with the link can view unless password protection is enabled.</div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="share-unpublish-btn" onclick="unpublishCurrentPage()" style="display:none">Unpublish</button>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-ghost" onclick="closePageShareModal()">Cancel</button>
+          <button class="btn btn-primary" id="share-save-btn" onclick="publishCurrentPage()">Publish</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- ══ MASCOT LOADING OVERLAY ════════════════════════════════════════════ -->

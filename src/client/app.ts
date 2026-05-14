@@ -1,4 +1,5 @@
 // src/client/app.ts — Main application logic (filesystem-backed)
+import './sentry.js';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import {
@@ -33,7 +34,7 @@ import 'jspreadsheet-ce/dist/jspreadsheet.css';
 import 'jsuites/dist/jsuites.css';
 import { api, getCurrentProjectId, setCurrentProjectId } from './api.js';
 import { canCreateFolderInParent, canMovePageToParent } from '../shared/page-depth.js';
-import type { PageNode, Asset, Settings, LLMMessage, Project, LLMProfile, MdTemplate, PriorityTodo, Priority, TeamMember } from '../shared/types.js';
+import type { PageNode, Asset, Settings, LLMMessage, Project, LLMProfile, MdTemplate, PriorityTodo, Priority, TeamMember, PageShareInfo } from '../shared/types.js';
 
 // ── TipTap editor instance type ───────────────────────────────────────────────
 interface TipTapChain {
@@ -395,6 +396,13 @@ declare global {
     closeCodeFileEditor: () => void;
     saveCodeFile: () => void;
     togglePageLock: () => void;
+    openPageShareModal: () => void;
+    openAssetShareModal: (id: string) => void;
+    closePageShareModal: () => void;
+    publishCurrentPage: () => void;
+    unpublishCurrentPage: () => void;
+    copyCurrentShareLink: () => void;
+    syncSharePasswordUI: () => void;
     addPriorityTodoBoard: () => void;
     addPriorityTodo: (priority: Priority) => void;
     editPriorityTodo: (id: string) => void;
@@ -420,6 +428,18 @@ declare global {
 // ── State ─────────────────────────────────────────────────────────────────────
 interface NavPageNode extends PageNode {
   _children: NavPageNode[];
+}
+
+function sidebarNavName(page: NavPageNode): string {
+  return page.display_name || page.name || '';
+}
+
+function compareSidebarNavNodes(a: NavPageNode, b: NavPageNode): number {
+  if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+  return sidebarNavName(a).localeCompare(sidebarNavName(b), undefined, {
+    numeric: true,
+    sensitivity: 'base',
+  });
 }
 
 interface AppTab {
@@ -483,6 +503,9 @@ let sheetEventsReady = false;
 let kanbanAssignableMembers: TeamMember[] = [];
 let kanbanAssignableMembersLoaded = false;
 let kanbanAssignableMembersPromise: Promise<TeamMember[]> | null = null;
+let currentShareInfo: PageShareInfo | null = null;
+type ShareTarget = { kind: 'page'; id: string; label: string } | { kind: 'asset'; id: string; label: string; assetType: 'image' | 'document' | 'file' };
+let currentShareTarget: ShareTarget | null = null;
 
 function isCloudPlusPlan(): boolean {
   const plan = state.userPlan.toLowerCase();
@@ -615,6 +638,13 @@ async function init(): Promise<void> {
   window.closeCodeFileEditor = closeCodeFileEditor;
   window.saveCodeFile = saveCodeFile;
   window.togglePageLock = togglePageLock;
+  window.openPageShareModal = openPageShareModal;
+  window.openAssetShareModal = openAssetShareModal;
+  window.closePageShareModal = closePageShareModal;
+  window.publishCurrentPage = publishCurrentPage;
+  window.unpublishCurrentPage = unpublishCurrentPage;
+  window.copyCurrentShareLink = copyCurrentShareLink;
+  window.syncSharePasswordUI = syncSharePasswordUI;
   window.addPriorityTodoBoard = addPriorityTodoBoard;
   window.addPriorityTodo = addPriorityTodo;
   window.editPriorityTodo = editPriorityTodo;
@@ -1537,6 +1567,7 @@ function renderSidebar(): void {
       roots.push(map[p.id]);
     }
   });
+  Object.values(map).forEach(page => page._children.sort(compareSidebarNavNodes));
 
   nav.innerHTML = '';
   const label = document.createElement('div');
@@ -1777,6 +1808,7 @@ async function renderPage(pageId: string): Promise<void> {
 
     $('html-edit-btn').classList.toggle('hidden', !isHtml);
     $('lock-page-btn')?.classList.toggle('hidden', !isPage);
+    $('share-page-btn')?.classList.toggle('hidden', !isPage);
     if (isHtml) {
       // Reset edit btn label on each navigation
       $('html-edit-btn').innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;display:inline-block;vertical-align:-2px;margin-right:4px"><path d="M 4 20 L 8 20 L 18 10 L 14 6 L 4 16 Z"/><path d="M 13 7 L 17 11"/></svg>Edit HTML';
@@ -1814,6 +1846,16 @@ function updateTopbar(page: PageNode): void {
     lockBtn.innerHTML = page.locked
       ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;display:inline-block;vertical-align:-2px;margin-right:4px"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M 8 11 V 8 a 4 4 0 0 1 8 0 v3"/></svg>Unlock'
       : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;display:inline-block;vertical-align:-2px;margin-right:4px"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M 8 11 V 8 a 4 4 0 0 1 8 0 v3"/></svg>Lock';
+  }
+  const shareBtn = $('share-page-btn');
+  if (shareBtn) {
+    const isPublished = !!page.share?.enabled;
+    shareBtn.classList.toggle('hidden', page.type !== 'page');
+    shareBtn.classList.toggle('btn-published-attention', isPublished);
+    shareBtn.title = isPublished ? 'Published - manage share' : 'Share read-only page';
+    shareBtn.innerHTML = isPublished
+      ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;display:inline-block;vertical-align:-2px;margin-right:4px"><path d="M 20 6 L 9 17 L 4 12"/></svg>Published'
+      : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;display:inline-block;vertical-align:-2px;margin-right:4px"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M 8.6 10.6 L 15.4 6.4"/><path d="M 8.6 13.4 L 15.4 17.6"/></svg>Share';
   }
 }
 
@@ -4152,6 +4194,16 @@ function pageFileTypeLabel(fileType: string | undefined): string {
   }
 }
 
+function renderPublishedBadge(share: PageShareInfo | undefined): string {
+  if (!share?.enabled) return '';
+  const label = share.password_protected ? 'Published, password protected' : 'Published';
+  return `
+    <span class="published-badge" title="${esc(label)}">
+      <span class="published-badge-dot" aria-hidden="true"></span>
+      <span>Published</span>
+    </span>`;
+}
+
 function renderFolderView(page: PageNode, container: HTMLElement): void {
   container.className = 'content-area fade-in';
   const children = page.children || [];
@@ -4202,7 +4254,7 @@ function renderFolderView(page: PageNode, container: HTMLElement): void {
         const childName = child.display_name || child.name;
         const ext = child.file_type || '';
         return `
-        <div class="child-card" data-filter-name="${esc(childName.toLowerCase())}" onclick="navigateTo('${child.id}')">
+        <div class="child-card" data-page-id="${child.id}" data-filter-name="${esc(childName.toLowerCase())}" onclick="navigateTo('${child.id}')">
           <div class="child-card-icon ${child.type === 'folder' ? 'folder' : ext}">
             ${child.type === 'folder'
             ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 3 7 V 19 H 21 V 9 H 11 L 9 7 H 3 Z"/></svg>`
@@ -4218,6 +4270,7 @@ function renderFolderView(page: PageNode, container: HTMLElement): void {
           </div>
           <div class="child-card-name">${esc(childName)}</div>
           <div class="child-card-meta">${child.type === 'folder' ? `${(state.pages.filter(p => p.parent_id === child.id).length + ((child as any).asset_count || 0))} items` : pageFileTypeLabel(ext)}</div>
+          ${renderPublishedBadge(child.share)}
           <button class="child-card-menu-btn" onclick="openChildCardMenu('${child.id}', event)" title="Actions" aria-label="Actions"><svg viewBox="0 0 24 24" fill="none" width="16" height="16"><circle cx="5" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="19" cy="12" r="1.5" fill="currentColor"/></svg></button>
         </div>`;
       };
@@ -4507,11 +4560,12 @@ function renderFileCard(a: Asset): string {
     ? `openCodeFileEditor('${a.id}','${esc(a.original_name)}','${api.assetUrl(a.id)}')`
     : `window.open('${api.assetUrl(a.id)}','_blank')`;
   return `
-    <div class="file-asset-card" data-ext="${ext.toLowerCase()}" data-filter-name="${esc(a.original_name.toLowerCase())}" onclick="${clickHandler}">
+    <div class="file-asset-card" data-asset-id="${a.id}" data-ext="${ext.toLowerCase()}" data-filter-name="${esc(a.original_name.toLowerCase())}" onclick="${clickHandler}">
       <div class="file-asset-icon"><span class="file-asset-ext">${ext || 'FILE'}</span></div>
       <div class="file-asset-info">
         <div class="file-asset-name">${esc(a.original_name)}</div>
         <div class="file-asset-meta">${sizeLabel}</div>
+        ${renderPublishedBadge(a.share)}
       </div>
       <button class="asset-menu-btn asset-menu-btn--inline" onclick="openAssetCardMenu('${a.id}', event)" title="Actions" aria-label="Actions"><svg viewBox="0 0 24 24" fill="none" width="16" height="16"><circle cx="5" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="19" cy="12" r="1.5" fill="currentColor"/></svg></button>
     </div>`;
@@ -4551,14 +4605,15 @@ function renderAssetsSection(page: PageNode): string {
           <div class="section-heading">Images &amp; Media · ${imgs.length}</div>
           <div class="asset-grid">
             ${imgs.map(a => `
-              <div class="asset-card" data-filter-name="${esc(a.original_name.toLowerCase())}" onclick="openLightbox('${api.assetUrl(a.id)}','${esc(a.original_name)}')">
+              <div class="asset-card" data-asset-id="${a.id}" data-filter-name="${esc(a.original_name.toLowerCase())}" onclick="openLightbox('${api.assetUrl(a.id)}','${esc(a.original_name)}')">
                 <div class="asset-preview">
                   <img src="${api.assetUrl(a.id)}" alt="${esc(a.original_name)}" loading="lazy">
                 </div>
                 <div class="asset-info">
-                  <div class="asset-name">${esc(a.original_name)}</div>
-                  <div class="asset-type">${(a.size / 1024).toFixed(1)} KB</div>
-                </div>
+	                  <div class="asset-name">${esc(a.original_name)}</div>
+	                  <div class="asset-type">${(a.size / 1024).toFixed(1)} KB</div>
+	                  ${renderPublishedBadge(a.share)}
+	                </div>
                 <button class="asset-menu-btn" onclick="openAssetCardMenu('${a.id}', event)" title="Actions" aria-label="Actions"><svg viewBox="0 0 24 24" fill="none" width="16" height="16"><circle cx="5" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="19" cy="12" r="1.5" fill="currentColor"/></svg></button>
               </div>
             `).join('')}
@@ -4595,6 +4650,7 @@ const ICON = {
   externalLink: `<svg ${SVG_ATTRS}><path d="M 14 4 H 20 V 10"/><path d="M 20 4 L 12 12"/><path d="M 18 14 V 19 a 1 1 0 0 1 -1 1 H 5 a 1 1 0 0 1 -1 -1 V 7 a 1 1 0 0 1 1 -1 H 10"/></svg>`,
   download: `<svg ${SVG_ATTRS}><path d="M 12 4 V 16"/><path d="M 7 12 L 12 17 L 17 12"/><path d="M 4 20 H 20"/></svg>`,
   copy: `<svg ${SVG_ATTRS}><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M 5 16 V 5 a 2 2 0 0 1 2 -2 H 16"/></svg>`,
+  share: `<svg ${SVG_ATTRS}><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M 8.6 10.7 L 15.4 6.3"/><path d="M 8.6 13.3 L 15.4 17.7"/></svg>`,
   trash: `<svg ${SVG_ATTRS}><path d="M 4 7 H 20"/><path d="M 9 4 H 15 V 7"/><path d="M 6 7 V 19 a 2 2 0 0 0 2 2 H 16 a 2 2 0 0 0 2 -2 V 7"/><path d="M 10 11 V 17"/><path d="M 14 11 V 17"/></svg>`,
   pencil: `<svg ${SVG_ATTRS}><path d="M 4 20 L 8 20 L 18 10 L 14 6 L 4 16 Z"/><path d="M 13 7 L 17 11"/></svg>`,
   arrowRight: `<svg ${SVG_ATTRS}><path d="M 4 12 H 20"/><path d="M 14 6 L 20 12 L 14 18"/></svg>`,
@@ -4769,6 +4825,7 @@ function openAssetCardMenu(assetId: string, ev: MouseEvent): void {
   openCardMenu(ev.currentTarget as HTMLElement, [
     { label: 'Open in new tab', icon: ICON.externalLink, href: url, target: '_blank' },
     { label: 'Download', icon: ICON.download, href: url, download: a.original_name },
+    { label: 'Share...', icon: ICON.share, onClick: () => openAssetShareModal(a.id) },
     { label: 'Copy URL', icon: ICON.copy, onClick: () => copyToClipboard(url) },
     { label: 'Move to…', icon: ICON.folderMove, onClick: () => openMoveModal('asset', a.id) },
     { label: 'Delete', icon: ICON.trash, danger: true, onClick: () => deleteAsset(a.id) },
@@ -5234,6 +5291,7 @@ function showWelcome(): void {
 
   document.getElementById('html-edit-btn')?.classList.add('hidden');
   document.getElementById('lock-page-btn')?.classList.add('hidden');
+  document.getElementById('share-page-btn')?.classList.add('hidden');
   hideSaveState();
 }
 
@@ -5670,6 +5728,241 @@ async function togglePageLock(): Promise<void> {
     showToast(next ? 'File locked' : 'File unlocked');
   } catch (err) {
     showToast('Lock failed: ' + (err as Error).message, 'error');
+  }
+}
+
+function shareTargetKindLabel(target = currentShareTarget): string {
+  if (!target) return 'page';
+  if (target.kind === 'page') return 'page';
+  return target.assetType;
+}
+
+function shareTargetTitle(target = currentShareTarget): string {
+  const kind = shareTargetKindLabel(target);
+  return kind.charAt(0).toUpperCase() + kind.slice(1);
+}
+
+function assetShareType(asset: Asset): 'image' | 'document' | 'file' {
+  const mime = asset.mime_type || '';
+  const ext = asset.original_name.split('.').pop()?.toLowerCase() || '';
+  const documentExts = new Set(['pdf', 'txt', 'md', 'markdown', 'html', 'htm', 'csv', 'json', 'xml', 'yaml', 'yml', 'toml', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'rtf']);
+  if (mime.startsWith('image/')) return 'image';
+  if (mime.startsWith('text/') || mime === 'application/pdf' || documentExts.has(ext)) return 'document';
+  return 'file';
+}
+
+function updateShareModalCopy(): void {
+  const kind = shareTargetKindLabel();
+  const title = shareTargetTitle();
+  const titleEl = document.getElementById('share-modal-title-text');
+  const passwordLabel = document.getElementById('share-password-label');
+  const note = document.getElementById('share-modal-note');
+  const urlLabel = document.getElementById('share-link-label');
+
+  if (titleEl) titleEl.textContent = `Share ${kind}`;
+  if (urlLabel) urlLabel.textContent = 'Read-only link';
+  if (passwordLabel) passwordLabel.textContent = `Password protect this shared ${kind}`;
+  if (note) {
+    note.textContent = `Shared ${kind}s are always read-only. Anyone with the link can view unless password protection is enabled.`;
+  }
+
+  const passwordInput = document.getElementById('share-page-password') as HTMLInputElement | null;
+  if (passwordInput && !passwordInput.value) {
+    passwordInput.placeholder = `Set a password for this shared ${kind}`;
+  }
+  const publishBtn = document.getElementById('share-save-btn') as HTMLButtonElement | null;
+  if (publishBtn && !currentShareInfo?.enabled) publishBtn.textContent = `Publish ${title.toLowerCase()}`;
+}
+
+function renderShareModalState(share: PageShareInfo): void {
+  currentShareInfo = share;
+  updateShareModalCopy();
+  const kind = shareTargetKindLabel();
+  const status = $('share-modal-status');
+  const linkGroup = $('share-link-group') as HTMLElement;
+  const urlInput = $('share-page-url') as HTMLInputElement;
+  const passwordToggle = $('share-password-enabled') as HTMLInputElement;
+  const passwordInput = $('share-page-password') as HTMLInputElement;
+  const saveBtn = $('share-save-btn') as HTMLButtonElement;
+  const unpublishBtn = $('share-unpublish-btn') as HTMLButtonElement;
+
+  status.classList.remove('loading', 'published', 'error');
+  status.classList.add(share.enabled ? 'published' : 'draft');
+  status.textContent = share.enabled
+    ? share.password_protected ? 'Published with password protection' : 'Published as read-only'
+    : 'Not published yet';
+
+  linkGroup.style.display = share.enabled && share.url ? '' : 'none';
+  urlInput.value = share.url ?? '';
+  passwordToggle.checked = !!share.password_protected;
+  passwordInput.value = '';
+  passwordInput.placeholder = share.password_protected
+    ? 'Leave blank to keep current password'
+    : `Set a password for this shared ${kind}`;
+
+  saveBtn.disabled = false;
+  saveBtn.textContent = share.enabled ? 'Update share' : `Publish ${kind}`;
+  unpublishBtn.disabled = false;
+  unpublishBtn.style.display = share.enabled ? '' : 'none';
+  syncSharePasswordUI();
+}
+
+function setShareModalLoading(message = 'Loading share settings...'): void {
+  updateShareModalCopy();
+  const status = $('share-modal-status');
+  status.classList.remove('published', 'draft', 'error');
+  status.classList.add('loading');
+  status.textContent = message;
+  ($('share-link-group') as HTMLElement).style.display = 'none';
+  ($('share-page-url') as HTMLInputElement).value = '';
+  ($('share-page-password') as HTMLInputElement).value = '';
+  ($('share-save-btn') as HTMLButtonElement).disabled = true;
+  ($('share-unpublish-btn') as HTMLButtonElement).disabled = true;
+}
+
+function setShareModalError(message: string): void {
+  const status = $('share-modal-status');
+  status.classList.remove('loading', 'published', 'draft');
+  status.classList.add('error');
+  status.textContent = message;
+  ($('share-save-btn') as HTMLButtonElement).disabled = false;
+  ($('share-unpublish-btn') as HTMLButtonElement).disabled = false;
+}
+
+async function openPageShareModal(): Promise<void> {
+  if (!state.currentPageId || state.currentPage?.type !== 'page') return;
+  closeCardMenu();
+  currentShareTarget = { kind: 'page', id: state.currentPageId, label: state.currentPage.display_name || state.currentPage.name };
+  $('share-page-overlay').classList.add('open');
+  setShareModalLoading();
+
+  try {
+    const { share } = await api.getPageShare(currentShareTarget.id);
+    renderShareModalState(share);
+  } catch (err) {
+    setShareModalError((err as Error).message);
+    showToast('Failed to load share settings: ' + (err as Error).message, 'error');
+  }
+}
+
+async function openAssetShareModal(assetId: string): Promise<void> {
+  const asset = state.currentPage?.assets?.find(a => a.id === assetId);
+  if (!asset) {
+    showToast('Asset not found', 'error');
+    return;
+  }
+  closeCardMenu();
+  currentShareTarget = {
+    kind: 'asset',
+    id: asset.id,
+    label: asset.original_name || asset.filename,
+    assetType: assetShareType(asset),
+  };
+  $('share-page-overlay').classList.add('open');
+  setShareModalLoading();
+
+  try {
+    const { share } = await api.getAssetShare(asset.id);
+    renderShareModalState(share);
+  } catch (err) {
+    setShareModalError((err as Error).message);
+    showToast('Failed to load share settings: ' + (err as Error).message, 'error');
+  }
+}
+
+function closePageShareModal(): void {
+  $('share-page-overlay').classList.remove('open');
+  currentShareTarget = null;
+  currentShareInfo = null;
+}
+
+function syncSharePasswordUI(): void {
+  const enabled = ($('share-password-enabled') as HTMLInputElement).checked;
+  const group = $('share-password-group') as HTMLElement;
+  group.style.display = enabled ? '' : 'none';
+}
+
+async function publishCurrentPage(): Promise<void> {
+  if (!currentShareTarget) return;
+  const target = currentShareTarget;
+
+  const passwordProtected = ($('share-password-enabled') as HTMLInputElement).checked;
+  const passwordInput = $('share-page-password') as HTMLInputElement;
+  const password = passwordInput.value.trim();
+  if (passwordProtected && !password && !currentShareInfo?.password_protected) {
+    showToast(`Enter a password before publishing this protected ${shareTargetKindLabel()}`, 'error');
+    passwordInput.focus();
+    return;
+  }
+
+  const saveBtn = $('share-save-btn') as HTMLButtonElement;
+  const unpublishBtn = $('share-unpublish-btn') as HTMLButtonElement;
+  saveBtn.disabled = true;
+  unpublishBtn.disabled = true;
+  const previousLabel = saveBtn.textContent || 'Publish';
+  saveBtn.textContent = currentShareInfo?.enabled ? 'Updating...' : 'Publishing...';
+
+  try {
+    const payload: { password_protected: boolean; password?: string } = { password_protected: passwordProtected };
+    if (password) payload.password = password;
+    const { share } = target.kind === 'page'
+      ? await api.updatePageShare(target.id, payload)
+      : await api.updateAssetShare(target.id, payload);
+    renderShareModalState(share);
+    if (target.kind === 'page' && state.currentPage?.id === target.id) {
+      state.currentPage.share = share;
+      updateTopbar(state.currentPage);
+    }
+    if (target.kind === 'asset' && state.currentPageId) {
+      await renderPage(state.currentPageId);
+    }
+    showToast(share.enabled ? 'Share link updated' : 'Share saved');
+  } catch (err) {
+    saveBtn.disabled = false;
+    unpublishBtn.disabled = false;
+    saveBtn.textContent = previousLabel;
+    showToast('Share failed: ' + (err as Error).message, 'error');
+  }
+}
+
+async function unpublishCurrentPage(): Promise<void> {
+  if (!currentShareTarget) return;
+  if (!currentShareInfo?.enabled) return;
+  const target = currentShareTarget;
+
+  const saveBtn = $('share-save-btn') as HTMLButtonElement;
+  const unpublishBtn = $('share-unpublish-btn') as HTMLButtonElement;
+  saveBtn.disabled = true;
+  unpublishBtn.disabled = true;
+
+  try {
+    const { share } = target.kind === 'page'
+      ? await api.deletePageShare(target.id)
+      : await api.deleteAssetShare(target.id);
+    renderShareModalState(share);
+    if (target.kind === 'page' && state.currentPage?.id === target.id) {
+      state.currentPage.share = share;
+      updateTopbar(state.currentPage);
+    }
+    if (target.kind === 'asset' && state.currentPageId) {
+      await renderPage(state.currentPageId);
+    }
+    showToast(`Shared ${shareTargetKindLabel()} unpublished`);
+  } catch (err) {
+    saveBtn.disabled = false;
+    unpublishBtn.disabled = false;
+    showToast('Unpublish failed: ' + (err as Error).message, 'error');
+  }
+}
+
+async function copyCurrentShareLink(): Promise<void> {
+  const value = (($('share-page-url') as HTMLInputElement).value || currentShareInfo?.url || '').trim();
+  if (!value) return;
+  try {
+    await navigator.clipboard.writeText(value);
+    showToast('Share link copied');
+  } catch {
+    showToast('Copy failed', 'error');
   }
 }
 
@@ -6627,6 +6920,7 @@ function setupEventListeners(): void {
   $('settings-overlay').addEventListener('click', (e: MouseEvent) => { if (e.target === $('settings-overlay')) closeSettings(); });
   $('lightbox').addEventListener('click', (e: MouseEvent) => { if (e.target === $('lightbox')) closeLightbox(); });
   $('move-item-overlay').addEventListener('click', (e: MouseEvent) => { if (e.target === $('move-item-overlay')) closeMoveModal(); });
+  $('share-page-overlay').addEventListener('click', (e: MouseEvent) => { if (e.target === $('share-page-overlay')) closePageShareModal(); });
 
   // Custom Move-target dropdown — toggle on trigger click, close on outside click
   $('move-target-trigger').addEventListener('click', (e: MouseEvent) => {
@@ -6659,6 +6953,7 @@ function setupEventListeners(): void {
       closeConfirmDelete(false);
       closeCreateProjectModal();
       closeRenameProjectModal();
+      closePageShareModal();
 
     }
   });
