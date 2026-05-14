@@ -1,13 +1,13 @@
-import * as Sentry from '@sentry/browser';
+import * as Sentry from '@sentry/react';
 
 declare const __YOINKO_RELEASE__: string;
 declare const __YOINKO_ENVIRONMENT__: string;
 
-type GlitchTipBrowserOptions = Parameters<typeof Sentry.init>[0] & {
+type GlitchTipReactOptions = Parameters<typeof Sentry.init>[0] & {
   autoSessionTracking: boolean;
 };
 
-const glitchTipOptions: GlitchTipBrowserOptions = {
+const glitchTipOptions: GlitchTipReactOptions = {
   dsn: 'https://d3056766e0c3486ea2af6ba940e2e93e@glitchtip-web-production-ee29.up.railway.app/7',
   tracesSampleRate: 0.01,
   autoSessionTracking: false,
@@ -16,3 +16,5 @@ const glitchTipOptions: GlitchTipBrowserOptions = {
 };
 
 Sentry.init(glitchTipOptions);
+
+export { Sentry };

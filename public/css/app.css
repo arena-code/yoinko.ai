@@ -5102,6 +5102,15 @@ mark.find-highlight-active {
 .tool-readonly-banner {
   margin-bottom: 12px;
 }
+.tool-error-fallback {
+  margin: 0;
+  padding: 16px;
+  border: 2px solid var(--danger);
+  border-radius: var(--radius-sm);
+  background: var(--danger-bg);
+  color: var(--danger);
+  font-weight: 800;
+}
 .editor-toolbar.locked {
   opacity: 0.55;
   pointer-events: none;

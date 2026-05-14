@@ -1,5 +1,5 @@
 // src/client/app.ts — Main application logic (filesystem-backed)
-import './sentry.js';
+import { Sentry } from './sentry.js';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import {
@@ -599,6 +599,14 @@ function showMascotLoading(text = 'Working on it…', sub = 'Yoyo is thinking'):
 
 function hideMascotLoading(): void {
   $('mascot-loading').classList.remove('active');
+}
+
+function withSentryErrorBoundary(child: React.ReactElement, fallbackText: string): React.ReactElement {
+  return React.createElement(
+    Sentry.ErrorBoundary,
+    { fallback: React.createElement('p', { className: 'tool-error-fallback' }, fallbackText) },
+    child,
+  );
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -2800,15 +2808,18 @@ function renderDiagramEditor(page: PageNode, container: HTMLElement): void {
   renderToolShell(container, toolPageTitle(page), locked, '<div id="diagram-flow-root" class="diagram-flow-root"></div>');
   const host = $('diagram-flow-root');
   diagramRoot = createRoot(host);
-  diagramRoot.render(React.createElement(DiagramFlowEditor, {
-    initialDoc: doc,
-    locked,
-    onSave: async (nextDoc: DiagramDoc) => {
-      if (!state.currentPage || state.currentPage.locked) return;
-      state.currentPage.content = JSON.stringify(nextDoc, null, 2);
-      await saveToolDoc(nextDoc);
-    },
-  }));
+  diagramRoot.render(withSentryErrorBoundary(
+    React.createElement(DiagramFlowEditor, {
+      initialDoc: doc,
+      locked,
+      onSave: async (nextDoc: DiagramDoc) => {
+        if (!state.currentPage || state.currentPage.locked) return;
+        state.currentPage.content = JSON.stringify(nextDoc, null, 2);
+        await saveToolDoc(nextDoc);
+      },
+    }),
+    'The diagram editor failed to render.',
+  ));
 }
 
 function DiagramFlowNode({ data, selected }: NodeProps<DiagramNode>): React.ReactElement {
@@ -3018,18 +3029,21 @@ function renderKanbanEditor(page: PageNode, container: HTMLElement): void {
   const host = $('kanban-kit-root');
   kanbanRoot = createRoot(host);
   const renderBoard = (members: TeamMember[], membersLoading: boolean) => {
-    kanbanRoot?.render(React.createElement(KanbanKitEditor, {
-      initialDoc: doc,
-      locked,
-      assignableMembers: members,
-      assignmentsEnabled,
-      membersLoading,
-      onSave: async (nextDoc: KanbanDoc) => {
-        if (!state.currentPage || state.currentPage.locked) return;
-        state.currentPage.content = JSON.stringify(nextDoc, null, 2);
-        await saveToolDoc(nextDoc);
-      },
-    }));
+    kanbanRoot?.render(withSentryErrorBoundary(
+      React.createElement(KanbanKitEditor, {
+        initialDoc: doc,
+        locked,
+        assignableMembers: members,
+        assignmentsEnabled,
+        membersLoading,
+        onSave: async (nextDoc: KanbanDoc) => {
+          if (!state.currentPage || state.currentPage.locked) return;
+          state.currentPage.content = JSON.stringify(nextDoc, null, 2);
+          await saveToolDoc(nextDoc);
+        },
+      }),
+      'The kanban board failed to render.',
+    ));
   };
 
   renderBoard(assignmentsEnabled ? kanbanAssignableMembers : [], assignmentsEnabled && !kanbanAssignableMembersLoaded);
