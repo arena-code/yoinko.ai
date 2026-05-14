@@ -3,6 +3,9 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
+# Install build tools for native addons (better-sqlite3)
+RUN apk add --no-cache python3 make g++
+
 # Install deps first (layer cache)
 COPY package.json package-lock.json* ./
 RUN npm ci --production=false
@@ -17,6 +20,9 @@ RUN npm run build
 FROM node:20-alpine AS production
 
 WORKDIR /app
+
+# Install build tools for native addons (better-sqlite3)
+RUN apk add --no-cache python3 make g++
 
 # Install production deps only
 COPY package.json package-lock.json* ./
