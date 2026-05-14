@@ -4,6 +4,7 @@ import type {
   PagesResponse, PageResponse, AssetsResponse, AssetResponse,
   SettingsResponse, SuccessResponse, ProjectsResponse, TemplatesResponse,
   StorageUsageResponse, WorkspaceMember, WorkspaceMembersResponse, TeamMembersResponse,
+  PriorityTodo,
 } from '../shared/types.js';
 
 const API_BASE = '/api';
@@ -67,7 +68,7 @@ export interface ChatStreamCallbacks {
 export interface AIGenerateParams {
   prompt: string;
   context?: string;
-  type?: 'md' | 'html';
+  type?: 'md' | 'html' | 'diagram' | 'kanban' | 'sheet';
 }
 
 export interface AIImageParams {
@@ -113,6 +114,8 @@ export const api = {
   getPage: (id: string) => request<PageResponse>('GET', `/pages/${id}`),
   createPage: (data: CreatePageParams) => request<PageResponse>('POST', '/pages', data),
   updatePage: (id: string, data: UpdatePageParams) => request<PageResponse>('PUT', `/pages/${id}`, data),
+  setPageLocked: (id: string, locked: boolean) => request<PageResponse>('PATCH', `/pages/${id}/lock`, { locked }),
+  updateFolderTodos: (id: string, todos: PriorityTodo[]) => request<PageResponse>('PUT', `/pages/${id}/todos`, { todos }),
   deletePage: (id: string) => request<SuccessResponse>('DELETE', `/pages/${id}`),
 
   // ── Assets ─────────────────────────────────────────────────────────────────

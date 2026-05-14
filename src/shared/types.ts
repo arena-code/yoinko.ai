@@ -17,7 +17,7 @@ export interface PageNode {
   display_name: string;
   num: string | null;
   type: 'page' | 'folder';
-  file_type?: 'md' | 'html';
+  file_type?: 'md' | 'html' | 'diagram' | 'kanban' | 'sheet';
   content?: string;
   parent_id?: string | null;
   children?: PageNode[];
@@ -25,6 +25,17 @@ export interface PageNode {
   created_at: string;
   updated_at: string;
   assets?: Asset[];
+  locked?: boolean;
+  priority_todos?: PriorityTodo[];
+}
+
+export type Priority = 'low' | 'medium' | 'high';
+
+export interface PriorityTodo {
+  id: string;
+  text: string;
+  priority: Priority;
+  done?: boolean;
 }
 
 export interface Asset {

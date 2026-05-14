@@ -29,6 +29,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
 
   <!-- Favicons -->
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
@@ -43,6 +44,7 @@
        lazily on first use, not on page load. -->
   <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/loader.js"></script>
 
+  <link rel="stylesheet" href="/js/app.bundle.css">
   <link rel="stylesheet" href="/css/app.css">
 </head>
 
@@ -104,9 +106,11 @@
           <span class="sidebar-user-email" id="sidebar-user-email"></span>
           <span class="sidebar-user-tenant" id="sidebar-user-tenant"></span>
         </div>
-        <button class="btn-cloud-logout" id="btn-logout" onclick="cloudLogout()" title="Sign out">
+        <button class="btn-cloud-logout" id="btn-logout" onclick="cloudLogout()" title="Sign out" aria-label="Sign out">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M 4 12 H 20"/><path d="M 14 6 L 20 12 L 14 18"/>
+            <path d="M 9 21 H 5 a 2 2 0 0 1 -2 -2 V 5 a 2 2 0 0 1 2 -2 h 4"/>
+            <path d="M 16 17 L 21 12 L 16 7"/>
+            <path d="M 21 12 H 9"/>
           </svg>
         </button>
       </div>
@@ -141,6 +145,9 @@
           <button class="btn btn-sm btn-ghost hidden" id="html-edit-btn" title="Toggle HTML editor"
             onclick="toggleHtmlEditMode()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;display:inline-block;vertical-align:-2px;margin-right:4px"><path d="M 4 20 L 8 20 L 18 10 L 14 6 L 4 16 Z"/><path d="M 13 7 L 17 11"/></svg>Edit HTML
+          </button>
+          <button class="btn btn-sm btn-ghost hidden" id="lock-page-btn" title="Lock page" onclick="togglePageLock()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;display:inline-block;vertical-align:-2px;margin-right:4px"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M 8 11 V 8 a 4 4 0 0 1 8 0 v3"/></svg>Lock
           </button>
           <span class="topbar-badge" id="topbar-badge"></span>
         </div>
@@ -297,6 +304,9 @@
         <select class="form-select" id="new-page-file-type">
           <option value="md">Markdown (.md)</option>
           <option value="html">HTML (.html)</option>
+          <option value="diagram">Diagram (.diagram.json)</option>
+          <option value="kanban">Task board (.kanban.json)</option>
+          <option value="sheet">Spreadsheet (.sheet.json)</option>
         </select>
       </div>
 

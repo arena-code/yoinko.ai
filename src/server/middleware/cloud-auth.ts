@@ -15,6 +15,7 @@ import type { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import fs from 'fs';
 import { jwtVerify, createRemoteJWKSet } from 'jose';
+import { clearAuthCookies, setAuthCookies } from '../auth-cookies.js';
 import { CLOUD_DATA_ROOT } from '../tenant-context.js';
 
 interface SupabaseJwtPayload {
@@ -48,6 +49,15 @@ const JWKS = SUPABASE_URL
 // ── Tenant cache (avoids Supabase REST call on every request) ─────────────────
 const tenantCache = new Map<string, { tenant: TenantInfo; expiresAt: number }>();
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+interface RefreshedSession {
+  accessToken: string;
+  refreshToken?: string;
+}
+
+const refreshInFlight = new Map<string, Promise<RefreshedSession | null>>();
+const recentRefreshes = new Map<string, { session: RefreshedSession; expiresAt: number }>();
+const RECENT_REFRESH_TTL_MS = 30 * 1000;
 
 // Invalidate a single user's cached tenant. Called by the admin endpoint when
 // the website removes a member or revokes access — gives immediate revocation
@@ -141,6 +151,10 @@ function extractRefreshToken(req: Request): string | null {
       if (name) cookies[name] = rest.join('=');
     });
 
+    if (cookies.yoinko_refresh_token) {
+      return decodeURIComponent(cookies.yoinko_refresh_token);
+    }
+
     const authCookieName = Object.keys(cookies).find(n => n.match(/^sb-[^-]+-auth-token$/));
     let raw = '';
     if (authCookieName && cookies[authCookieName]) {
@@ -169,10 +183,24 @@ function extractRefreshToken(req: Request): string | null {
 }
 
 // Uses the refresh_token to obtain a new access_token from Supabase.
-// Returns the new access_token string, or null on failure.
-async function refreshAccessToken(refreshToken: string): Promise<string | null> {
+// Returns the new session tokens, or null on failure.
+async function refreshAccessToken(refreshToken: string): Promise<RefreshedSession | null> {
+  const recent = recentRefreshes.get(refreshToken);
+  if (recent && recent.expiresAt > Date.now()) {
+    return recent.session;
+  }
+  if (recent) {
+    recentRefreshes.delete(refreshToken);
+  }
+
+  const pending = refreshInFlight.get(refreshToken);
+  if (pending) {
+    return pending;
+  }
+
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return null;
-  try {
+
+  const refreshPromise = (async (): Promise<RefreshedSession | null> => {
     const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
       method: 'POST',
       headers: {
@@ -182,11 +210,24 @@ async function refreshAccessToken(refreshToken: string): Promise<string | null> 
       body: JSON.stringify({ refresh_token: refreshToken }),
     });
     if (!res.ok) return null;
-    const data = await res.json() as { access_token?: string };
-    return data.access_token ?? null;
-  } catch {
-    return null;
-  }
+    const data = await res.json() as { access_token?: string; refresh_token?: string };
+    if (!data.access_token) return null;
+    const session = {
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token ?? refreshToken,
+    };
+    recentRefreshes.set(refreshToken, {
+      session,
+      expiresAt: Date.now() + RECENT_REFRESH_TTL_MS,
+    });
+    setTimeout(() => recentRefreshes.delete(refreshToken), RECENT_REFRESH_TTL_MS).unref?.();
+    return session;
+  })().catch(() => null).finally(() => {
+    refreshInFlight.delete(refreshToken);
+  });
+
+  refreshInFlight.set(refreshToken, refreshPromise);
+  return refreshPromise;
 }
 
 function makeTenantInfo(id: string, ownerId: string, subdomain: string, status: string, plan: string): TenantInfo {
@@ -353,6 +394,18 @@ export function cloudAuth(req: Request, res: Response, next: NextFunction): void
   const token = extractToken(req);
 
   if (!token) {
+    const refreshToken = extractRefreshToken(req);
+    if (refreshToken) {
+      if (!JWKS) {
+        console.error('[cloud-auth] NEXT_PUBLIC_SUPABASE_URL not set — cannot verify JWTs');
+        res.status(500).json({ error: 'Server misconfigured' });
+        return;
+      }
+
+      void refreshAndContinue(refreshToken, req, res, next);
+      return;
+    }
+
     if (req.path.startsWith('/api/')) {
       res.status(401).json({ error: 'Authentication required' });
       return;
@@ -371,7 +424,7 @@ export function cloudAuth(req: Request, res: Response, next: NextFunction): void
   verifyAndContinue(token, req, res, next);
 }
 
-async function verifyAndContinue(token: string, req: Request, res: Response, next: NextFunction) {
+async function verifyAndContinue(token: string, req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { payload } = await jwtVerify(token, JWKS!);
     const sub = payload.sub as string;
@@ -403,24 +456,9 @@ async function verifyAndContinue(token: string, req: Request, res: Response, nex
     const code = err?.code;
 
     if (code === 'ERR_JWT_EXPIRED') {
-      // ── Transparent token refresh ────────────────────────────────────────
-      // Extract the refresh_token from the Supabase cookie and ask Supabase
-      // for a new access_token.  If successful, store it in a yoinko_token
-      // cookie (survives until browser closes) and retry verification so the
-      // user never sees a logout screen.
       const refreshToken = extractRefreshToken(req);
       if (refreshToken) {
-        console.log('[cloud-auth] Access token expired — attempting silent refresh');
-        const newAccessToken = await refreshAccessToken(refreshToken);
-        if (newAccessToken) {
-          console.log('[cloud-auth] Token refreshed successfully');
-          // Set the new access token as a session cookie so the next request uses it
-          res.setHeader('Set-Cookie',
-            `yoinko_token=${encodeURIComponent(newAccessToken)}; Path=/; HttpOnly; SameSite=Lax; Secure`);
-          // Retry verification with the fresh token
-          return verifyAndContinue(newAccessToken, req, res, next);
-        }
-        console.log('[cloud-auth] Token refresh failed — refresh token may be revoked');
+        return refreshAndContinue(refreshToken, req, res, next);
       }
 
       // Refresh unavailable or failed — redirect to sign-in
@@ -428,19 +466,37 @@ async function verifyAndContinue(token: string, req: Request, res: Response, nex
         res.status(401).json({ error: 'Token expired' });
         return;
       }
-      res.clearCookie('yoinko_token');
+      clearAuthCookies(res);
       sendAuthBlockPage(res, 'session expired', 'your session has expired. please sign in again to continue.', 'sign in again', '/auth/login');
       return;
     }
 
     console.error('[cloud-auth] JWT verify failed:', err.code || err.name, err.message);
-    res.clearCookie('yoinko_token');
+    clearAuthCookies(res);
     if (req.path.startsWith('/api/')) {
       res.status(403).json({ error: 'Invalid token' });
       return;
     }
     sendAuthBlockPage(res, 'authentication failed', 'your authentication token is invalid. please sign in again.', 'sign in again', '/auth/login');
   }
+}
+
+async function refreshAndContinue(refreshToken: string, req: Request, res: Response, next: NextFunction): Promise<void> {
+  console.log('[cloud-auth] Access token missing or expired — attempting silent refresh');
+  const session = await refreshAccessToken(refreshToken);
+  if (session) {
+    console.log('[cloud-auth] Token refreshed successfully');
+    setAuthCookies(res, session.accessToken, session.refreshToken);
+    return verifyAndContinue(session.accessToken, req, res, next);
+  }
+
+  console.log('[cloud-auth] Token refresh failed — refresh token may be revoked');
+  if (req.path.startsWith('/api/')) {
+    res.status(401).json({ error: 'Token expired' });
+    return;
+  }
+  clearAuthCookies(res);
+  sendAuthBlockPage(res, 'session expired', 'your session has expired. please sign in again to continue.', 'sign in again', '/auth/login');
 }
 
 // ── Blocking auth page ────────────────────────────────────────────────────────

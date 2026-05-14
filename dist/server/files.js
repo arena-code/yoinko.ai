@@ -1,8 +1,9 @@
 // src/server/files.ts — Filesystem-based page manager (multi-project aware)
-// Pages live in data/<project>/pages/ as real .md and .html files
+// Pages live in data/<project>/pages/ as real .md, .html, and JSON tool files
 import fs from 'fs';
 import path from 'path';
 import { getProjectDirs } from './projects.js';
+export const PAGE_FILE_EXTENSIONS = ['md', 'html', 'diagram.json', 'kanban.json', 'sheet.json'];
 // ── Project pages dir ─────────────────────────────────────────────────────────
 export function getPagesDir(projectId = 'default', dataDir) {
     const { pagesDir } = getProjectDirs(projectId, dataDir);
@@ -95,9 +96,11 @@ export function scanDir(baseDir, relDir) {
                 updated_at: stat.mtime.toISOString(),
             });
         }
-        else if (entry.name.endsWith('.md') || entry.name.endsWith('.html')) {
-            const ext = entry.name.endsWith('.md') ? 'md' : 'html';
-            const baseName = entry.name.replace(/\.(md|html)$/, '');
+        else {
+            const fileType = pageFileType(entry.name);
+            if (!fileType)
+                continue;
+            const baseName = entry.name.replace(/\.(md|html|diagram\.json|kanban\.json|sheet\.json)$/, '');
             const { num, display_name } = parseName(baseName);
             let stat;
             try {
@@ -113,14 +116,39 @@ export function scanDir(baseDir, relDir) {
                 display_name,
                 num,
                 type: 'page',
-                file_type: ext,
+                file_type: fileType,
                 child_count: 0,
                 created_at: stat.birthtime.toISOString(),
                 updated_at: stat.mtime.toISOString(),
+                locked: isPageLocked(baseDir, relPath),
             });
         }
     }
     return items;
+}
+export function pageFileType(filename) {
+    if (filename.endsWith('.diagram.json'))
+        return 'diagram';
+    if (filename.endsWith('.kanban.json'))
+        return 'kanban';
+    if (filename.endsWith('.sheet.json'))
+        return 'sheet';
+    if (filename.endsWith('.html'))
+        return 'html';
+    if (filename.endsWith('.md'))
+        return 'md';
+    return null;
+}
+export function extensionForFileType(fileType) {
+    if (fileType === 'diagram')
+        return 'diagram.json';
+    if (fileType === 'kanban')
+        return 'kanban.json';
+    if (fileType === 'sheet')
+        return 'sheet.json';
+    if (fileType === 'html')
+        return 'html';
+    return 'md';
 }
 // ── Flatten tree to array ─────────────────────────────────────────────────────
 export function flattenTree(tree, parentId = null) {
@@ -142,11 +170,42 @@ export function readPage(pagesDir, relPath) {
         throw new Error('File not found: ' + relPath);
     return fs.readFileSync(fullPath, 'utf8');
 }
+export function isPageLocked(pagesDir, relPath) {
+    const safe = sanitizePath(relPath);
+    return fs.existsSync(path.join(pagesDir, `${safe}.lock`));
+}
+export function setPageLocked(pagesDir, relPath, locked) {
+    const safe = sanitizePath(relPath);
+    const fullPath = path.join(pagesDir, safe);
+    if (!fs.existsSync(fullPath))
+        throw new Error('File not found: ' + relPath);
+    const lockPath = `${fullPath}.lock`;
+    if (locked)
+        fs.writeFileSync(lockPath, new Date().toISOString(), 'utf8');
+    else if (fs.existsSync(lockPath))
+        fs.unlinkSync(lockPath);
+}
+export function readFolderTodos(pagesDir, relPath) {
+    const safe = sanitizePath(relPath);
+    const todoPath = path.join(pagesDir, safe, '.yoinko-todos.json');
+    if (!fs.existsSync(todoPath))
+        return '[]';
+    return fs.readFileSync(todoPath, 'utf8');
+}
+export function writeFolderTodos(pagesDir, relPath, todosJson) {
+    const safe = sanitizePath(relPath);
+    const folderPath = path.join(pagesDir, safe);
+    if (!fs.existsSync(folderPath) || !fs.statSync(folderPath).isDirectory())
+        throw new Error('Folder not found');
+    fs.writeFileSync(path.join(folderPath, '.yoinko-todos.json'), todosJson, 'utf8');
+}
 export function writePage(pagesDir, relPath, content) {
     const safe = sanitizePath(relPath);
     const fullPath = path.join(pagesDir, safe);
     if (!fs.existsSync(fullPath))
         throw new Error('File not found: ' + relPath);
+    if (isPageLocked(pagesDir, relPath))
+        throw new Error('File is locked');
     fs.writeFileSync(fullPath, content, 'utf8');
 }
 export function createPage(pagesDir, relPath, content = '') {
@@ -169,6 +228,8 @@ export function deletePath(pagesDir, relPath) {
     const fullPath = path.join(pagesDir, safe);
     if (!fs.existsSync(fullPath))
         throw new Error('Not found');
+    if (isPageLocked(pagesDir, relPath))
+        throw new Error('File is locked');
     const stat = fs.statSync(fullPath);
     if (stat.isDirectory()) {
         fs.rmSync(fullPath, { recursive: true, force: true });
@@ -182,6 +243,8 @@ export function renamePath(pagesDir, oldRelPath, newName) {
     const oldFull = path.join(pagesDir, safeOld);
     if (!fs.existsSync(oldFull))
         throw new Error('Not found');
+    if (isPageLocked(pagesDir, oldRelPath))
+        throw new Error('File is locked');
     const newFull = path.join(path.dirname(oldFull), newName);
     fs.renameSync(oldFull, newFull);
     return path.join(path.dirname(safeOld), newName).replace(/\\/g, '/');

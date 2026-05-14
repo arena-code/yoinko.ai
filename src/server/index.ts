@@ -92,6 +92,7 @@ app.get('/api/me', (req, res) => {
   }
   res.json({
     user: {
+      id: user.id || null,
       email: user.email || null,
       tenantId: user.tenantId || null,
       isOwner: (req as any).isOwner ?? true,

@@ -1,10 +1,18 @@
 import type { PageNode } from '../shared/types.js';
+export declare const PAGE_FILE_EXTENSIONS: readonly ["md", "html", "diagram.json", "kanban.json", "sheet.json"];
+export type PageFileType = 'md' | 'html' | 'diagram' | 'kanban' | 'sheet';
 export declare function getPagesDir(projectId?: string, dataDir?: string): string;
 export declare function toId(relPath: string): string;
 export declare function fromId(id: string): string;
 export declare function scanDir(baseDir: string, relDir?: string): PageNode[];
+export declare function pageFileType(filename: string): PageFileType | null;
+export declare function extensionForFileType(fileType: string): string;
 export declare function flattenTree(tree: PageNode[], parentId?: string | null): PageNode[];
 export declare function readPage(pagesDir: string, relPath: string): string;
+export declare function isPageLocked(pagesDir: string, relPath: string): boolean;
+export declare function setPageLocked(pagesDir: string, relPath: string, locked: boolean): void;
+export declare function readFolderTodos(pagesDir: string, relPath: string): string;
+export declare function writeFolderTodos(pagesDir: string, relPath: string, todosJson: string): void;
 export declare function writePage(pagesDir: string, relPath: string, content: string): void;
 export declare function createPage(pagesDir: string, relPath: string, content?: string): void;
 export declare function createFolder(pagesDir: string, relPath: string): void;

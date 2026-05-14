@@ -3,6 +3,7 @@
 // Active ONLY when YOINKO_CLOUD=true.
 
 import { Router } from 'express';
+import { clearAuthCookies, setAuthCookies } from '../auth-cookies.js';
 
 const router = Router();
 
@@ -21,34 +22,20 @@ router.get('/callback', (_req, res) => {
 
 // ── POST /auth/set-token — Store JWT in httpOnly cookie ──────────────────────
 router.post('/set-token', (req, res) => {
-  const { access_token } = req.body;
+  const { access_token, refresh_token } = req.body;
   if (!access_token) {
     res.status(400).json({ error: 'Missing access_token' });
     return;
   }
 
-  res.cookie('yoinko_token', access_token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    path: '/',
-  });
+  setAuthCookies(res, access_token, refresh_token);
 
   res.json({ ok: true });
 });
 
 // ── POST /auth/logout — Clear ALL auth cookies ──────────────────────────────
 router.post('/logout', (req, res) => {
-  const isProduction = process.env.NODE_ENV === 'production';
-
-  // Clear yoinko_token — must match exact options from set-token
-  res.clearCookie('yoinko_token', {
-    httpOnly: true,
-    secure: isProduction,
-    sameSite: 'lax',
-    path: '/',
-  });
+  clearAuthCookies(res);
 
   // Clear any Supabase SSR cookies (sb-<ref>-auth-token and chunked variants)
   const cookieHeader = req.headers.cookie || '';
@@ -66,14 +53,7 @@ router.post('/logout', (req, res) => {
 
 // ── GET /auth/logout — Clear cookies and redirect to login ───────────────────
 router.get('/logout', (req, res) => {
-  const isProduction = process.env.NODE_ENV === 'production';
-
-  res.clearCookie('yoinko_token', {
-    httpOnly: true,
-    secure: isProduction,
-    sameSite: 'lax',
-    path: '/',
-  });
+  clearAuthCookies(res);
 
   const cookieHeader = req.headers.cookie || '';
   const cookieNames = cookieHeader.split(';').map(c => c.trim().split('=')[0]).filter(Boolean);
@@ -292,7 +272,7 @@ function loginPage(): string {
     } else {
       // Check existing session (skip if we just signed out)
       const { data: { session } } = await supabase.auth.getSession();
-      if (session?.access_token) await setTokenAndRedirect(session.access_token);
+      if (session?.access_token) await setTokenAndRedirect(session);
     }
 
     // Email + password
@@ -313,7 +293,7 @@ function loginPage(): string {
         submitBtn.textContent = 'sign in';
         return;
       }
-      if (data.session?.access_token) await setTokenAndRedirect(data.session.access_token);
+      if (data.session?.access_token) await setTokenAndRedirect(data.session);
     });
 
     // OAuth
@@ -331,11 +311,14 @@ function loginPage(): string {
       }
     };
 
-    async function setTokenAndRedirect(token) {
+    async function setTokenAndRedirect(session) {
       const res = await fetch('/auth/set-token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ access_token: token }),
+        body: JSON.stringify({
+          access_token: session.access_token,
+          refresh_token: session.refresh_token,
+        }),
       });
       if (res.ok) window.location.href = '/';
     }
@@ -633,7 +616,7 @@ function callbackPage(): string {
         if (error) throw error;
         if (data.session?.access_token) {
           handled = true;
-          await storeAndRedirect(data.session.access_token);
+          await storeAndRedirect(data.session);
         }
       } catch (err) {
         showError(err.message || 'Code exchange failed');
@@ -651,18 +634,21 @@ function callbackPage(): string {
         if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session?.access_token) {
           handled = true;
           clearTimeout(timeout);
-          await storeAndRedirect(session.access_token);
+          await storeAndRedirect(session);
         }
       });
     }
 
-    async function storeAndRedirect(token) {
+    async function storeAndRedirect(session) {
       statusEl.textContent = 'almost there…';
       subEl.textContent = 'setting up your workspace';
       const res = await fetch('/auth/set-token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ access_token: token }),
+        body: JSON.stringify({
+          access_token: session.access_token,
+          refresh_token: session.refresh_token,
+        }),
       });
       if (!res.ok) {
         showError('Failed to store session');

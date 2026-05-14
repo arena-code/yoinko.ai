@@ -7,9 +7,11 @@ import { getPagesDir } from '../files.js';
 import {
   scanDir, flattenTree, readPage, writePage,
   createPage, createFolder, deletePath, renamePath,
-  toId, fromId,
+  toId, fromId, extensionForFileType, pageFileType, isPageLocked, setPageLocked,
+  readFolderTodos, writeFolderTodos,
 } from '../files.js';
-import type { PageNode, Asset } from '../../shared/types.js';
+import { canCreateFolderInParent, canMovePageToParent } from '../../shared/page-depth.js';
+import type { PageNode, Asset, PriorityTodo } from '../../shared/types.js';
 import { projectId, dataDir } from '../request-helpers.js';
 
 const router = express.Router();
@@ -54,6 +56,7 @@ router.get('/:id', (req: Request, res: Response) => {
 
     if (page.type === 'page') {
       try { page.content = readPage(pagesDir, relPath); } catch { page.content = ''; }
+      page.locked = isPageLocked(pagesDir, relPath);
     }
     if (page.type === 'folder') {
       page.children = flat.filter(p => p.parent_id === page.id).map(child => {
@@ -62,6 +65,11 @@ router.get('/:id', (req: Request, res: Response) => {
         ).get(child.id))?.cnt ?? 0;
         return { ...child, asset_count: assetCount };
       });
+      try {
+        page.priority_todos = JSON.parse(readFolderTodos(pagesDir, relPath)) as PriorityTodo[];
+      } catch {
+        page.priority_todos = [];
+      }
     }
 
     const assets = db.prepare<string, Omit<Asset, 'url'>>(
@@ -89,6 +97,7 @@ router.post('/', (req: Request, res: Response) => {
       content?: string;
     };
     if (!name || !type) return void res.status(400).json({ error: 'name and type required' });
+    const flatBeforeCreate = flattenTree(scanDir(pagesDir));
 
     let parentRelPath = '';
     if (parent_id) {
@@ -97,10 +106,13 @@ router.post('/', (req: Request, res: Response) => {
 
     let relPath: string;
     if (type === 'folder') {
+      if (!canCreateFolderInParent(parent_id ?? null, flatBeforeCreate)) {
+        return void res.status(400).json({ error: 'Folders can only be nested one level deep' });
+      }
       relPath = parentRelPath ? `${parentRelPath}/${name}` : name;
       createFolder(pagesDir, relPath);
     } else {
-      const ext = file_type ?? 'md';
+      const ext = extensionForFileType(file_type ?? 'md');
       const filename = `${name}.${ext}`;
       relPath = parentRelPath ? `${parentRelPath}/${filename}` : filename;
       createPage(pagesDir, relPath, content ?? '');
@@ -124,17 +136,20 @@ router.put('/:id', (req: Request, res: Response) => {
 
     const relPath = fromId(req.params.id as string);
     const { content, name } = req.body as { content?: string; name?: string };
+    if (isPageLocked(pagesDir, relPath)) {
+      return void res.status(423).json({ error: 'File is locked' });
+    }
 
     if (name !== undefined) {
-      const ext = path.extname(relPath);
-      const newFileName = ext ? `${name}${ext}` : name;
+      const existingFileType = pageFileType(path.basename(relPath));
+      const newFileName = existingFileType ? `${name}.${extensionForFileType(existingFileType)}` : name;
       const newRelPath = renamePath(pagesDir, relPath, newFileName);
       const newId = toId(newRelPath);
 
       // If this is a folder rename (no extension), migrate asset page_ids:
       //   Case 1: assets attached directly to the renamed folder (page_id === oldId)
       //   Case 2: assets attached to pages/subfolders inside the renamed folder
-      if (!ext) {
+      if (!existingFileType) {
         const db = getProjectDb(pid, dataDir(req));
         const oldId = toId(relPath);
         const oldPrefix = relPath + '/';   // e.g. "01 - Branding/"
@@ -182,12 +197,63 @@ router.put('/:id', (req: Request, res: Response) => {
   }
 });
 
+// ── PATCH /api/pages/:id/lock — lock/unlock page editing ─────────────────────
+router.patch('/:id/lock', (req: Request, res: Response) => {
+  try {
+    const pid = projectId(req);
+    const pagesDir = getPagesDir(pid, dataDir(req));
+    const relPath = fromId(req.params.id as string);
+    const { locked } = req.body as { locked?: boolean };
+    setPageLocked(pagesDir, relPath, !!locked);
+    const flat = flattenTree(scanDir(pagesDir));
+    const page = flat.find(p => p.id === req.params.id as string);
+    if (page) page.locked = !!locked;
+    res.json({ page: page ?? { id: req.params.id as string, path: relPath, locked: !!locked } });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ── PUT /api/pages/:id/todos — folder priority to-do board ───────────────────
+router.put('/:id/todos', (req: Request, res: Response) => {
+  try {
+    const pid = projectId(req);
+    const dd = dataDir(req);
+    const pagesDir = getPagesDir(pid, dd);
+    const relPath = fromId(req.params.id as string);
+    const flat = flattenTree(scanDir(pagesDir));
+    const page = flat.find(p => p.id === req.params.id as string);
+    if (!page || page.type !== 'folder') {
+      return void res.status(400).json({ error: 'To-do boards can only be added to folders' });
+    }
+
+    const { todos } = req.body as { todos?: PriorityTodo[] };
+    const safeTodos = Array.isArray(todos)
+      ? todos.filter(t => t && typeof t.id === 'string' && typeof t.text === 'string')
+        .map(t => ({
+          id: t.id,
+          text: t.text,
+          priority: t.priority === 'high' || t.priority === 'medium' || t.priority === 'low' ? t.priority : 'medium',
+          done: !!t.done,
+        }))
+      : [];
+    writeFolderTodos(pagesDir, relPath, JSON.stringify(safeTodos, null, 2));
+    page.priority_todos = safeTodos;
+    res.json({ page });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 // ── DELETE /api/pages/:id ─────────────────────────────────────────────────────
 router.delete('/:id', (req: Request, res: Response) => {
   try {
     const pid = projectId(req);
     const pagesDir = getPagesDir(pid, dataDir(req));
     const relPath = fromId(req.params.id as string);
+    if (isPageLocked(pagesDir, relPath)) {
+      return void res.status(423).json({ error: 'File is locked' });
+    }
     deletePath(pagesDir, relPath);
     res.json({ success: true });
   } catch (err) {
@@ -202,7 +268,15 @@ router.put('/:id/move', (req: Request, res: Response) => {
     const dd = dataDir(req);
     const pagesDir = getPagesDir(pid, dd);
     const relPath = fromId(req.params.id as string);
+    if (isPageLocked(pagesDir, relPath)) {
+      return void res.status(423).json({ error: 'File is locked' });
+    }
     const { target_parent_id } = req.body as { target_parent_id?: string };
+    const flatBeforeMove = flattenTree(scanDir(pagesDir));
+
+    if (!canMovePageToParent(req.params.id as string, target_parent_id ?? null, flatBeforeMove)) {
+      return void res.status(400).json({ error: 'Folders can only be nested one level deep' });
+    }
 
     // Resolve target directory (root or a specific folder)
     let targetDir = '';

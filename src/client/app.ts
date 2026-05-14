@@ -1,6 +1,39 @@
 // src/client/app.ts — Main application logic (filesystem-backed)
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import {
+  addEdge,
+  Background,
+  Controls,
+  Handle,
+  MarkerType,
+  MiniMap,
+  Position,
+  ReactFlow,
+  useEdgesState,
+  useNodesState,
+  type Connection,
+  type Edge,
+  type Node as FlowNode,
+  type NodeChange,
+  type NodeMouseHandler,
+  type NodeProps,
+  type OnSelectionChangeParams,
+} from '@xyflow/react';
+import '@xyflow/react/dist/style.css';
+import {
+  Kanban,
+  dropColumnHandler,
+  dropHandler,
+  type BoardData,
+  type BoardItem,
+} from 'react-kanban-kit';
+import jspreadsheet from 'jspreadsheet-ce';
+import 'jspreadsheet-ce/dist/jspreadsheet.css';
+import 'jsuites/dist/jsuites.css';
 import { api, getCurrentProjectId, setCurrentProjectId } from './api.js';
-import type { PageNode, Asset, Settings, LLMMessage, Project, LLMProfile, MdTemplate } from '../shared/types.js';
+import { canCreateFolderInParent, canMovePageToParent } from '../shared/page-depth.js';
+import type { PageNode, Asset, Settings, LLMMessage, Project, LLMProfile, MdTemplate, PriorityTodo, Priority, TeamMember } from '../shared/types.js';
 
 // ── TipTap editor instance type ───────────────────────────────────────────────
 interface TipTapChain {
@@ -58,6 +91,240 @@ interface TipTapDoc {
   content?: TipTapDoc[];
   marks?: Array<{ type: string; attrs?: Record<string, unknown> }>;
   text?: string;
+}
+
+type LegacyDiagramShape = { id: string; type: 'box' | 'note'; x: number; y: number; text: string; color: string };
+type DiagramNodeKind = 'box' | 'note' | 'text';
+type DiagramNodeData = { label: string; color?: string; kind?: DiagramNodeKind };
+type DiagramNode = FlowNode<DiagramNodeData, 'yoinko'>;
+type DiagramEdge = Edge<Record<string, unknown>>;
+type DiagramDoc = { nodes: DiagramNode[]; edges: DiagramEdge[] };
+type KanbanStatus = string;
+type KanbanColumn = { id: KanbanStatus; title: string };
+type KanbanTask = { id: string; title: string; status: KanbanStatus; priority?: Priority; assignee_id?: string; assignee_email?: string };
+type KanbanDoc = { tasks: KanbanTask[]; columns?: KanbanColumn[] };
+type KanbanCardContent = { priority?: Priority; assignee_id?: string; assignee_email?: string };
+type SheetColumnDoc = { title?: string; width?: string | number };
+type SheetWorksheetDoc = { name?: string; cells?: string[][]; style?: Record<string, string>; columns?: SheetColumnDoc[] };
+type SheetDoc = { cells?: string[][]; worksheets?: SheetWorksheetDoc[] };
+type SheetCellValue = jspreadsheet.CellValue;
+type SheetWorksheet = jspreadsheet.WorksheetInstance;
+type SheetSpreadsheet = jspreadsheet.SpreadsheetInstance;
+type SheetToolbarItem = jspreadsheet.ToolbarItem;
+type SheetToolbarConfig = { items?: SheetToolbarItem[]; [key: string]: unknown };
+type ReactFlowProps = {
+  initialDoc: DiagramDoc;
+  locked: boolean;
+  onSave: (doc: DiagramDoc) => Promise<void>;
+};
+type KanbanReactProps = {
+  initialDoc: KanbanDoc;
+  locked: boolean;
+  assignableMembers: TeamMember[];
+  assignmentsEnabled: boolean;
+  membersLoading: boolean;
+  onSave: (doc: KanbanDoc) => Promise<void>;
+};
+type KanbanKitConfigMap = Record<string, {
+  render: (props: { data: BoardItem; column: BoardItem; index: number; isDraggable: boolean }) => React.ReactNode;
+  isDraggable?: boolean;
+}>;
+type KanbanKitDropCardParams = {
+  cardId: string;
+  fromColumnId: string;
+  toColumnId: string;
+  taskAbove: string | null;
+  taskBelow: string | null;
+  position?: number;
+};
+type KanbanKitDropColumnParams = {
+  columnId: string;
+  fromIndex: number;
+  toIndex: number;
+};
+
+function uid(prefix = 'id'): string {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function parseJson<T>(content: string | undefined, fallback: T): T {
+  if (!content?.trim()) return fallback;
+  try { return JSON.parse(content) as T; } catch { return fallback; }
+}
+
+function createDiagramNode(label: string, position: { x: number; y: number }, color = '#fff3bf', kind: DiagramNodeKind = 'box'): DiagramNode {
+  return {
+    id: uid('node'),
+    type: 'yoinko',
+    position,
+    data: { label, color, kind },
+  };
+}
+
+function withDiagramNodeStyle(node: DiagramNode): DiagramNode {
+  const kind = node.data?.kind || 'box';
+  const color = node.data?.color || (kind === 'text' ? 'transparent' : '#fff3bf');
+  const { style: _legacyStyle, className: _legacyClassName, ...nodeWithoutLegacyWrapperStyles } = node;
+  return {
+    ...nodeWithoutLegacyWrapperStyles,
+    type: 'yoinko',
+    data: {
+      label: String(node.data?.label || 'Untitled'),
+      color,
+      kind,
+    },
+  };
+}
+
+function normalizeDiagramDoc(content: string | undefined): DiagramDoc {
+  const raw = parseJson<Partial<DiagramDoc> & { shapes?: LegacyDiagramShape[] }>(content, {});
+  if (Array.isArray(raw.nodes)) {
+    return {
+      nodes: raw.nodes.map(node => withDiagramNodeStyle(node as DiagramNode)),
+      edges: Array.isArray(raw.edges) ? raw.edges.map(edge => ({
+        ...edge,
+        markerEnd: edge.markerEnd || { type: MarkerType.ArrowClosed },
+      } as DiagramEdge)) : [],
+    };
+  }
+  if (Array.isArray(raw.shapes)) {
+    return {
+      nodes: raw.shapes.map(shape => createDiagramNode(shape.text || 'Untitled', { x: Number(shape.x) || 0, y: Number(shape.y) || 0 }, shape.color || '#fff3bf', shape.type)),
+      edges: [],
+    };
+  }
+  return { nodes: [], edges: [] };
+}
+
+const DEFAULT_KANBAN_COLUMNS: KanbanColumn[] = [
+  { id: 'todo', title: 'To do' },
+  { id: 'doing', title: 'Doing' },
+  { id: 'done', title: 'Done' },
+];
+
+function kanbanColumnsForDoc(doc: KanbanDoc): KanbanColumn[] {
+  const columns = Array.isArray(doc.columns) && doc.columns.length
+    ? [...doc.columns]
+    : [...DEFAULT_KANBAN_COLUMNS];
+  for (const task of doc.tasks) {
+    if (!columns.some(col => col.id === task.status)) {
+      columns.push({ id: task.status, title: task.status });
+    }
+  }
+  return columns;
+}
+
+function kanbanDocToBoardData(doc: KanbanDoc): BoardData {
+  const columns = kanbanColumnsForDoc(doc);
+  const dataSource: BoardData = {
+    root: {
+      id: 'root',
+      title: 'Root',
+      parentId: null,
+      children: columns.map(col => col.id),
+      totalChildrenCount: columns.length,
+    },
+  };
+  for (const col of columns) {
+    const children = doc.tasks.filter(task => task.status === col.id).map(task => task.id);
+    dataSource[col.id] = {
+      id: col.id,
+      title: col.title,
+      parentId: 'root',
+      children,
+      totalChildrenCount: children.length,
+      isDraggable: true,
+    };
+  }
+  for (const task of doc.tasks) {
+    dataSource[task.id] = {
+      id: task.id,
+      title: task.title || 'Untitled task',
+      parentId: task.status,
+      children: [],
+      totalChildrenCount: 0,
+      type: 'card',
+      content: {
+        priority: task.priority || 'medium',
+        assignee_id: task.assignee_id,
+        assignee_email: task.assignee_email,
+      } satisfies KanbanCardContent,
+    };
+  }
+  return dataSource;
+}
+
+function boardDataToKanbanDoc(dataSource: BoardData): KanbanDoc {
+  const columns = (dataSource.root?.children || [])
+    .map(columnId => dataSource[columnId])
+    .filter((column): column is BoardItem => !!column)
+    .map(column => ({ id: column.id, title: column.title }));
+  const tasks: KanbanTask[] = [];
+  for (const col of columns) {
+    const column = dataSource[col.id];
+    for (const taskId of column?.children || []) {
+      const task = dataSource[taskId];
+      if (!task) continue;
+      const content = (task.content || {}) as KanbanCardContent;
+      tasks.push({
+        id: task.id,
+        title: task.title || 'Untitled task',
+        status: task.parentId || column.id,
+        priority: content.priority || 'medium',
+        assignee_id: content.assignee_id || undefined,
+        assignee_email: content.assignee_email || undefined,
+      });
+    }
+  }
+  return { columns, tasks };
+}
+
+function normalizeKanbanBoardData(dataSource: BoardData): BoardData {
+  const next: BoardData = { ...dataSource };
+  for (const columnId of next.root?.children || []) {
+    const column = next[columnId];
+    if (!column) continue;
+    const children = column.children || [];
+    next[columnId] = { ...column, children, totalChildrenCount: children.length };
+    for (const taskId of children) {
+      const task = next[taskId];
+      if (task) next[taskId] = { ...task, parentId: columnId };
+    }
+  }
+  return next;
+}
+
+function defaultContentForFileType(fileType: string): string {
+  if (fileType === 'diagram') {
+    return JSON.stringify({
+      nodes: [
+        createDiagramNode('Start', { x: 80, y: 100 }, '#fff3bf', 'note'),
+        createDiagramNode('Next step', { x: 360, y: 100 }, '#d0ebff', 'box'),
+      ],
+      edges: [],
+    } satisfies DiagramDoc, null, 2);
+  }
+  if (fileType === 'kanban') {
+    return JSON.stringify({ tasks: [] } satisfies KanbanDoc, null, 2);
+  }
+  if (fileType === 'sheet') {
+    return JSON.stringify({
+      cells: [
+        ['Name', 'Status', 'Notes'],
+        ['', '', ''],
+        ['', '', ''],
+      ],
+      worksheets: [{
+        name: 'Sheet 1',
+        cells: [
+          ['Name', 'Status', 'Notes'],
+          ['', '', ''],
+          ['', '', ''],
+        ],
+      }],
+    } satisfies SheetDoc, null, 2);
+  }
+  return '';
 }
 
 declare global {
@@ -125,6 +392,14 @@ declare global {
     openCodeFileEditor: (id: string, name: string, url: string) => void;
     closeCodeFileEditor: () => void;
     saveCodeFile: () => void;
+    togglePageLock: () => void;
+    addPriorityTodoBoard: () => void;
+    addPriorityTodo: (priority: Priority) => void;
+    editPriorityTodo: (id: string) => void;
+    togglePriorityTodo: (id: string) => void;
+    deletePriorityTodo: (id: string) => void;
+    addSheetRow: () => void;
+    addSheetColumn: () => void;
     switchTab: (tabId: string) => void;
     closeTab: (tabId: string) => void;
     openNewTab: () => void;
@@ -171,6 +446,7 @@ interface AppState {
   isCloud: boolean;
   isOwner: boolean;
   userPlan: string;
+  currentUser: TeamMember | null;
 }
 
 const state: AppState = {
@@ -191,7 +467,99 @@ const state: AppState = {
   isCloud: false,
   isOwner: true,
   userPlan: 'basic',
+  currentUser: null,
 };
+
+let diagramRoot: Root | null = null;
+let kanbanRoot: Root | null = null;
+let sheetHost: HTMLDivElement | null = null;
+let sheetWorksheet: SheetWorksheet | null = null;
+let sheetSpreadsheet: SheetSpreadsheet | null = null;
+let sheetPageId: string | null = null;
+let sheetSaveTimer: ReturnType<typeof setTimeout> | undefined;
+let sheetEventsReady = false;
+let kanbanAssignableMembers: TeamMember[] = [];
+let kanbanAssignableMembersLoaded = false;
+let kanbanAssignableMembersPromise: Promise<TeamMember[]> | null = null;
+
+function isCloudPlusPlan(): boolean {
+  const plan = state.userPlan.toLowerCase();
+  return state.isCloud && (plan === 'cloud_plus' || plan.includes('plus') || plan.includes('pro'));
+}
+
+function withCurrentUserMember(members: TeamMember[]): TeamMember[] {
+  const merged: TeamMember[] = [];
+  const seen = new Set<string>();
+  const add = (member: TeamMember | null | undefined) => {
+    if (!member?.user_id || !member.email || seen.has(member.user_id)) return;
+    seen.add(member.user_id);
+    merged.push(member);
+  };
+
+  add(state.currentUser);
+  members.forEach(add);
+  return merged;
+}
+
+async function loadKanbanAssignableMembers(): Promise<TeamMember[]> {
+  if (!isCloudPlusPlan()) return [];
+  if (kanbanAssignableMembersLoaded) return kanbanAssignableMembers;
+  if (kanbanAssignableMembersPromise) return kanbanAssignableMembersPromise;
+
+  kanbanAssignableMembersPromise = api.getTeamMembers()
+    .then(({ members }) => {
+      kanbanAssignableMembers = withCurrentUserMember(members);
+      kanbanAssignableMembersLoaded = true;
+      return kanbanAssignableMembers;
+    })
+    .catch(() => {
+      kanbanAssignableMembersLoaded = true;
+      kanbanAssignableMembers = withCurrentUserMember([]);
+      return kanbanAssignableMembers;
+    })
+    .finally(() => {
+      kanbanAssignableMembersPromise = null;
+    });
+
+  return kanbanAssignableMembersPromise;
+}
+
+function disposeDiagramRoot(): void {
+  if (!diagramRoot) return;
+  try { diagramRoot.unmount(); } catch { /* already unmounted */ }
+  diagramRoot = null;
+}
+
+function disposeKanbanRoot(): void {
+  if (!kanbanRoot) return;
+  try { kanbanRoot.unmount(); } catch { /* already unmounted */ }
+  kanbanRoot = null;
+}
+
+function disposeSheetGrid(): void {
+  if (sheetSaveTimer) {
+    clearTimeout(sheetSaveTimer);
+    sheetSaveTimer = undefined;
+    if (sheetWorksheet && sheetPageId) {
+      void saveSheetFromInstance(sheetPageId, sheetWorksheet);
+    }
+  }
+
+  if (sheetHost) {
+    try { jspreadsheet.destroy(sheetHost as Parameters<typeof jspreadsheet.destroy>[0], true); } catch { sheetHost.innerHTML = ''; }
+  }
+  sheetHost = null;
+  sheetWorksheet = null;
+  sheetSpreadsheet = null;
+  sheetPageId = null;
+  sheetEventsReady = false;
+}
+
+function disposeReactToolRoots(): void {
+  disposeDiagramRoot();
+  disposeKanbanRoot();
+  disposeSheetGrid();
+}
 
 // ── DOM helpers ───────────────────────────────────────────────────────────────
 const $ = (id: string): HTMLElement => document.getElementById(id) as HTMLElement;
@@ -244,6 +612,14 @@ async function init(): Promise<void> {
   window.openCodeFileEditor = openCodeFileEditor;
   window.closeCodeFileEditor = closeCodeFileEditor;
   window.saveCodeFile = saveCodeFile;
+  window.togglePageLock = togglePageLock;
+  window.addPriorityTodoBoard = addPriorityTodoBoard;
+  window.addPriorityTodo = addPriorityTodo;
+  window.editPriorityTodo = editPriorityTodo;
+  window.togglePriorityTodo = togglePriorityTodo;
+  window.deletePriorityTodo = deletePriorityTodo;
+  window.addSheetRow = addSheetRow;
+  window.addSheetColumn = addSheetColumn;
   window.switchTab = switchTab;
   window.closeTab = closeTab;
   window.openNewTab = openNewTab;
@@ -329,10 +705,13 @@ async function init(): Promise<void> {
           const tenantEl = document.getElementById('sidebar-user-tenant');
           if (emailEl && me.user.email) emailEl.textContent = me.user.email;
           if (tenantEl && me.user.tenantId) tenantEl.textContent = me.user.tenantId + '.yoinko.ai';
+          if (me.user.id && me.user.email) {
+            state.currentUser = { user_id: me.user.id, email: me.user.email };
+            kanbanAssignableMembersLoaded = false;
+          }
           state.isOwner = me.user.isOwner ?? true;
           state.userPlan = me.user.plan ?? 'basic';
-          const isPlus = state.userPlan.toLowerCase().includes('plus') || state.userPlan.toLowerCase().includes('pro');
-          if (isPlus) {
+          if (isCloudPlusPlan()) {
             (window as any).__yoinkoWorkspaceLimit = Infinity;
           }
           // Re-render switcher now that isOwner + plan are known
@@ -426,8 +805,8 @@ function renderProjectSwitcher(): void {
           <span class="project-menu-avatar${p.logo ? ' has-logo' : ''}" ${p.logo ? '' : avatarStyle(p.name, p.id === 'default')}>${avatarMarkup(p)}</span>
           <span class="project-menu-item-name">${esc(p.name)}</span>
           ${state.isOwner ? `<span class="project-menu-actions">
-                 ${state.isCloud && (state.userPlan.toLowerCase().includes('plus') || state.userPlan.toLowerCase().includes('pro'))
-                   ? `<button class="project-menu-action-btn"
+                 ${isCloudPlusPlan()
+          ? `<button class="project-menu-action-btn"
                            onclick="event.stopPropagation();openWorkspaceMembersModal('${p.id}','${esc(p.name)}')"
                            title="Manage access">
                        <svg viewBox="0 0 12 12" fill="none" width="11" height="11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
@@ -454,20 +833,20 @@ function renderProjectSwitcher(): void {
   }).join('')}
       <div class="project-menu-divider"></div>
       ${state.isOwner
-        ? state.isCloud && isFinite(getWorkspaceLimit()) && state.projects.length >= getWorkspaceLimit()
-          ? `<div class="project-menu-item project-menu-new project-menu-new--limit" aria-disabled="true">
+      ? state.isCloud && isFinite(getWorkspaceLimit()) && state.projects.length >= getWorkspaceLimit()
+        ? `<div class="project-menu-item project-menu-new project-menu-new--limit" aria-disabled="true">
                <span class="project-menu-new-icon">+</span>
                <span>New workspace <span class="project-menu-limit-badge">${state.projects.length}/${getWorkspaceLimit()}</span></span>
              </div>`
-          : `<div class="project-menu-item project-menu-new"
+        : `<div class="project-menu-item project-menu-new"
                  role="button" tabindex="0"
                  onclick="openCreateProjectModal()"
                  onkeydown="if(event.key==='Enter')openCreateProjectModal()">
                <span class="project-menu-new-icon">+</span>
                <span>New workspace</span>
              </div>`
-        : ''
-      }
+      : ''
+    }
     </div>
   `;
 
@@ -1028,11 +1407,15 @@ function loadSavedTabs(): void {
   } catch { /* corrupted data */ }
 }
 
-function pageIcon(page: PageNode | undefined): string {
-  const yk = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+function pageIcon(page: PageNode | undefined, className = ''): string {
+  const cls = className ? ` class="${className}"` : '';
+  const yk = `${cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
   if (!page) return `<svg ${yk}><path d="M 6 3 H 14 L 19 8 V 21 H 6 Z"/><path d="M 14 3 V 8 H 19"/></svg>`;
   if (page.type === 'folder') return `<svg ${yk}><path d="M 3 7 V 19 H 21 V 9 H 11 L 9 7 H 3 Z"/></svg>`;
   if (page.file_type === 'html') return `<svg ${yk}><path d="M 6 3 H 14 L 19 8 V 21 H 6 Z"/><path d="M 14 3 V 8 H 19"/><path d="M 9 12 H 16"/><path d="M 9 15 H 13"/></svg>`;
+  if (page.file_type === 'diagram') return `<svg ${yk}><rect x="4" y="4" width="6" height="6" rx="1.5"/><rect x="14" y="14" width="6" height="6" rx="1.5"/><path d="M 10 7 H 13 C 15 7 16 8 16 10 V 14"/></svg>`;
+  if (page.file_type === 'kanban') return `<svg ${yk}><rect x="4" y="4" width="4" height="16" rx="1.5"/><rect x="10" y="4" width="4" height="10" rx="1.5"/><rect x="16" y="4" width="4" height="13" rx="1.5"/></svg>`;
+  if (page.file_type === 'sheet') return `<svg ${yk}><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M 4 10 H 20"/><path d="M 4 15 H 20"/><path d="M 10 4 V 20"/><path d="M 15 4 V 20"/></svg>`;
   return `<svg ${yk}><path d="M 6 3 H 14 L 19 8 V 21 H 6 Z"/><path d="M 14 3 V 8 H 19"/><path d="M 9 12 H 16"/><path d="M 9 15 H 16"/><path d="M 9 18 H 13"/></svg>`;
 }
 
@@ -1194,9 +1577,7 @@ function buildNavItem(page: NavPageNode, showNum: boolean, num?: number): HTMLEl
     item.innerHTML = `
       <div class="nav-item-inner">
         ${numStr ? `<span class="nav-num">${numStr}</span>` : ''}
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M 3 7 V 19 H 21 V 9 H 11 L 9 7 H 3 Z"/>
-        </svg>
+        ${pageIcon(page, 'nav-icon')}
         <span class="nav-name">${esc(displayName)}</span>
 
       </div>
@@ -1230,9 +1611,7 @@ function buildNavItem(page: NavPageNode, showNum: boolean, num?: number): HTMLEl
     item.className = 'nav-item';
     item.dataset.pageId = page.id;
     const ext = page.file_type || 'md';
-    const icon = ext === 'html'
-      ? `<svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 6 3 H 14 L 19 8 V 21 H 6 Z"/><path d="M 14 3 V 8 H 19"/><path d="M 9 12 H 16"/><path d="M 9 15 H 13"/></svg>`
-      : `<svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 6 3 H 14 L 19 8 V 21 H 6 Z"/><path d="M 14 3 V 8 H 19"/><path d="M 9 12 H 16"/><path d="M 9 15 H 16"/><path d="M 9 18 H 13"/></svg>`;
+    const icon = pageIcon(page, 'nav-icon');
     item.innerHTML = `
       <div class="nav-item-inner">
         ${numStr ? `<span class="nav-num">${numStr}</span>` : ''}
@@ -1250,16 +1629,41 @@ function buildNavItem(page: NavPageNode, showNum: boolean, num?: number): HTMLEl
 function buildSubNavItem(page: NavPageNode): HTMLElement {
   const displayName = page.display_name || page.name;
   const isFolder = page.type === 'folder';
+  const hasChildren = page._children && page._children.length > 0;
+  const isExpanded = state.expandedFolders.has(page.id);
+  const icon = pageIcon(page, 'nav-sub-icon');
+
+  const wrapper = document.createElement('div');
   const item = document.createElement('div');
   item.className = 'nav-sub-item';
   item.dataset.pageId = page.id;
-  const icon = isFolder
-    ? `<svg class="nav-sub-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 3 7 V 19 H 21 V 9 H 11 L 9 7 H 3 Z"/></svg>`
-    : `<svg class="nav-sub-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 6 3 H 14 L 19 8 V 21 H 6 Z"/><path d="M 14 3 V 8 H 19"/><path d="M 9 12 H 16"/><path d="M 9 15 H 16"/><path d="M 9 18 H 13"/></svg>`;
-  item.innerHTML = `${icon}<span class="nav-sub-name">${esc(displayName)}</span>`;
+  item.innerHTML = `
+    ${icon}
+    <span class="nav-sub-name">${esc(displayName)}</span>
+    ${isFolder && hasChildren ? `
+      <button class="nav-expand-btn${isExpanded ? ' open' : ''}" data-folder-id="${page.id}" aria-label="Toggle folder">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 9 6 L 15 12 L 9 18"/></svg>
+      </button>
+    ` : ''}
+  `;
   item.addEventListener('click', (e) => void navigateTo(page.id, e.metaKey || e.ctrlKey));
+  item.querySelector('.nav-expand-btn')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleFolder(page.id);
+  });
   item.addEventListener('contextmenu', e => showCtxMenu(e, page));
-  return item;
+  wrapper.appendChild(item);
+
+  if (isFolder && hasChildren) {
+    const childrenEl = document.createElement('div');
+    childrenEl.className = `nav-children${isExpanded ? ' open' : ''}`;
+    childrenEl.id = `children-${page.id}`;
+    page._children.forEach(child => childrenEl.appendChild(buildSubNavItem(child)));
+    wrapper.appendChild(childrenEl);
+  }
+
+  return wrapper;
 }
 
 function toggleFolder(folderId: string): void {
@@ -1281,6 +1685,15 @@ function highlightActive(): void {
     const isActive = el.dataset.pageId === state.currentPageId;
     el.classList.toggle('active', isActive);
   });
+}
+
+function expandAncestorFolders(pageId: string): void {
+  const byId = new Map(state.pages.map(p => [p.id, p]));
+  let page = byId.get(pageId);
+  while (page?.parent_id) {
+    state.expandedFolders.add(page.parent_id);
+    page = byId.get(page.parent_id);
+  }
 }
 
 // ── Navigation ────────────────────────────────────────────────────────────────
@@ -1308,7 +1721,7 @@ async function navigateTo(pageId: string, newTab = false): Promise<void> {
   state.currentPageId = pageId;
   window.location.hash = `page/${pageId}`;
 
-  if (page?.parent_id) state.expandedFolders.add(page.parent_id);
+  expandAncestorFolders(pageId);
   if (page?.type === 'folder') state.expandedFolders.add(pageId);
 
   saveTabs();
@@ -1341,6 +1754,7 @@ async function renderPage(pageId: string): Promise<void> {
   // Close find bar when navigating away
   closeFindBar();
   $('find-bar').style.display = 'none';
+  disposeReactToolRoots();
 
   const content = $('content-area');
   content.className = 'content-area';
@@ -1360,6 +1774,7 @@ async function renderPage(pageId: string): Promise<void> {
     const isHtml = isPage && page.file_type === 'html';
 
     $('html-edit-btn').classList.toggle('hidden', !isHtml);
+    $('lock-page-btn')?.classList.toggle('hidden', !isPage);
     if (isHtml) {
       // Reset edit btn label on each navigation
       $('html-edit-btn').innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;display:inline-block;vertical-align:-2px;margin-right:4px"><path d="M 4 20 L 8 20 L 18 10 L 14 6 L 4 16 Z"/><path d="M 13 7 L 17 11"/></svg>Edit HTML';
@@ -1371,6 +1786,12 @@ async function renderPage(pageId: string): Promise<void> {
       renderWysiwygEditor(page, content);
     } else if (page.file_type === 'html') {
       renderHtmlEditor(page, content);
+    } else if (page.file_type === 'diagram') {
+      renderDiagramEditor(page, content);
+    } else if (page.file_type === 'kanban') {
+      renderKanbanEditor(page, content);
+    } else if (page.file_type === 'sheet') {
+      renderSheetEditor(page, content);
     }
   } catch (err) {
     content.innerHTML = `<div class="fade-in" style="text-align:center;padding:60px 0;color:var(--danger);">Failed to load: ${esc((err as Error).message)}</div>`;
@@ -1381,7 +1802,17 @@ function updateTopbar(page: PageNode): void {
   const parent = state.pages.find(p => p.id === page.parent_id);
   $('bc-parent').textContent = parent ? (parent.display_name || parent.name) : 'yoınko';
   ($('page-title') as HTMLInputElement).value = page.display_name || page.name;
+  ($('page-title') as HTMLInputElement).disabled = !!page.locked;
   $('topbar-badge').textContent = page.type === 'folder' ? 'folder' : (page.file_type || 'md');
+  const lockBtn = $('lock-page-btn');
+  if (lockBtn) {
+    lockBtn.classList.toggle('hidden', page.type !== 'page');
+    lockBtn.classList.toggle('btn-unlock-attention', !!page.locked);
+    lockBtn.title = page.locked ? 'Unlock page' : 'Lock page';
+    lockBtn.innerHTML = page.locked
+      ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;display:inline-block;vertical-align:-2px;margin-right:4px"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M 8 11 V 8 a 4 4 0 0 1 8 0 v3"/></svg>Unlock'
+      : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;display:inline-block;vertical-align:-2px;margin-right:4px"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M 8 11 V 8 a 4 4 0 0 1 8 0 v3"/></svg>Lock';
+  }
 }
 
 // No-op stubs kept for API safety
@@ -1496,9 +1927,11 @@ function tiptapToMarkdown(doc: TipTapDoc): string {
 
 function renderWysiwygEditor(page: PageNode, container: HTMLElement): void {
   container.className = 'content-area wysiwyg-wrap fade-in';
+  const locked = !!page.locked;
   container.innerHTML = `
-    <div class="wysiwyg-page">
-      <div class="editor-toolbar" id="editor-toolbar" role="toolbar" aria-label="Formatting">
+    <div class="wysiwyg-page${locked ? ' is-locked' : ''}">
+      ${locked ? '<div class="tool-readonly-banner">Locked. Unlock this page before editing.</div>' : ''}
+      ${locked ? '' : `<div class="editor-toolbar" id="editor-toolbar" role="toolbar" aria-label="Formatting">
 
         <!-- History -->
         <button class="tb-btn" id="tb-undo" title="Undo (⌘Z)">
@@ -1599,9 +2032,9 @@ function renderWysiwygEditor(page: PageNode, container: HTMLElement): void {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 3 12 H 21"/><circle cx="3" cy="12" r="1" fill="currentColor"/><circle cx="21" cy="12" r="1" fill="currentColor"/></svg>
         </button>
 
-      </div>
+      </div>`}
       <div id="wysiwyg-editor" class="tiptap-host" spellcheck="true"></div>
-      <div class="tiptap-hint">
+      <div class="tiptap-hint${locked ? ' hidden' : ''}">
         <span><kbd>**</kbd> bold</span>
         <span><kbd>*</kbd> italic</span>
         <span><kbd># </kbd> heading</span>
@@ -1687,7 +2120,8 @@ function renderWysiwygEditor(page: PageNode, container: HTMLElement): void {
       }),
     ],
     content: initialHtml,
-    autofocus: true,
+    autofocus: !locked,
+    editable: !locked,
     editorProps: {
       attributes: { class: 'tiptap-content', spellcheck: 'true' },
       // Copy/cut → write markdown to the clipboard's text/plain MIME type so
@@ -1708,6 +2142,7 @@ function renderWysiwygEditor(page: PageNode, container: HTMLElement): void {
       },
     },
     onUpdate({ editor }: { editor: { getJSON: () => TipTapDoc } }) {
+      if (locked) return;
       const md = tiptapToMarkdown(editor.getJSON());
       debounceSave(md);
       if (state.currentPage) state.currentPage.content = md;
@@ -2170,6 +2605,10 @@ function toggleHtmlEditMode(): void {
   const container = $('content-area');
   const page = state.currentPage;
   if (!page) return;
+  if (page.locked) {
+    showToast('Unlock this page before editing', 'error');
+    return;
+  }
 
   const isEditing = container.classList.contains('editor-mode');
 
@@ -2265,6 +2704,7 @@ async function mountHtmlEditor(host: HTMLElement, page: PageNode, frame: HTMLIFr
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 
 function debounceSave(content: string): void {
+  if (state.currentPage?.locked) return;
   clearTimeout(saveTimer);
   showSavingState();
   saveTimer = setTimeout(() => savePage(content), 1000);
@@ -2272,6 +2712,10 @@ function debounceSave(content: string): void {
 
 async function savePage(content: string): Promise<void> {
   if (!state.currentPageId) return;
+  if (state.currentPage?.locked) {
+    showToast('Unlock this page before editing', 'error');
+    return;
+  }
   clearTimeout(saveTimer);
   showSavingState();
   try {
@@ -2282,6 +2726,1212 @@ async function savePage(content: string): Promise<void> {
     showToast('Save failed: ' + (err as Error).message, 'error');
     hideSaveState();
   }
+}
+
+async function saveToolDoc<T>(doc: T): Promise<void> {
+  await savePage(JSON.stringify(doc, null, 2));
+}
+
+function renderToolShell(container: HTMLElement, title: string, locked: boolean, body: string): void {
+  container.className = 'content-area fade-in tool-page';
+  container.innerHTML = `
+    <div class="tool-surface">
+      <div class="tool-header">
+        <h2>${esc(title)}</h2>
+        ${locked ? '<span class="tool-lock-pill">Locked</span>' : ''}
+      </div>
+      ${locked ? '<div class="tool-readonly-banner">This file is locked. Unlock it before making changes.</div>' : ''}
+      ${body}
+    </div>
+  `;
+}
+
+function toolPageTitle(page: PageNode): string {
+  return page.display_name || page.name || 'Untitled';
+}
+
+function renderDiagramEditor(page: PageNode, container: HTMLElement): void {
+  const locked = !!page.locked;
+  const doc = normalizeDiagramDoc(page.content);
+  renderToolShell(container, toolPageTitle(page), locked, '<div id="diagram-flow-root" class="diagram-flow-root"></div>');
+  const host = $('diagram-flow-root');
+  diagramRoot = createRoot(host);
+  diagramRoot.render(React.createElement(DiagramFlowEditor, {
+    initialDoc: doc,
+    locked,
+    onSave: async (nextDoc: DiagramDoc) => {
+      if (!state.currentPage || state.currentPage.locked) return;
+      state.currentPage.content = JSON.stringify(nextDoc, null, 2);
+      await saveToolDoc(nextDoc);
+    },
+  }));
+}
+
+function DiagramFlowNode({ data, selected }: NodeProps<DiagramNode>): React.ReactElement {
+  const color = data.color || '#fff3bf';
+  const kind = data.kind || 'box';
+  const label = String(data.label || 'Untitled');
+  const isText = kind === 'text';
+  return React.createElement('div', {
+    className: `diagram-flow-node diagram-flow-node-${kind}${selected ? ' is-selected' : ''}`,
+    style: isText ? undefined : { background: color },
+  },
+    isText ? null : React.createElement(Handle, { id: 'top-in', type: 'target', position: Position.Top }),
+    isText ? null : React.createElement(Handle, { id: 'right-out', type: 'source', position: Position.Right }),
+    isText ? null : React.createElement(Handle, { id: 'bottom-out', type: 'source', position: Position.Bottom }),
+    isText ? null : React.createElement(Handle, { id: 'left-in', type: 'target', position: Position.Left }),
+    React.createElement('div', { className: 'diagram-flow-node-label' }, label));
+}
+
+function DiagramFlowEditor({ initialDoc, locked, onSave }: ReactFlowProps): React.ReactElement {
+  const [nodes, setNodes, onNodesChangeBase] = useNodesState<DiagramNode>(initialDoc.nodes);
+  const [edges, setEdges, onEdgesChangeBase] = useEdgesState<DiagramEdge>(initialDoc.edges);
+  const [selected, setSelected] = useState<{ nodeIds: string[]; edgeIds: string[] }>({ nodeIds: [], edgeIds: [] });
+  const [renameDraft, setRenameDraft] = useState<{ id: string; label: string } | null>(null);
+  const mountedRef = useRef(false);
+  const dirtyRef = useRef(false);
+  const latestDocRef = useRef<DiagramDoc>(initialDoc);
+  const saveTimerRef = useRef<number | null>(null);
+  const renameInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (renameDraft) renameInputRef.current?.focus();
+  }, [renameDraft]);
+
+  useEffect(() => {
+    latestDocRef.current = {
+      nodes: nodes.map(node => withDiagramNodeStyle(node)),
+      edges,
+    };
+  }, [nodes, edges]);
+
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+      if (dirtyRef.current && !locked) void onSave(latestDocRef.current);
+    };
+  }, [locked, onSave]);
+
+  useEffect(() => {
+    if (!mountedRef.current) {
+      mountedRef.current = true;
+      return;
+    }
+    if (locked) return;
+    dirtyRef.current = true;
+    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = window.setTimeout(() => {
+      dirtyRef.current = false;
+      void onSave(latestDocRef.current);
+    }, 350);
+  }, [nodes, edges, locked, onSave]);
+
+  const onNodesChange = useCallback((changes: NodeChange<DiagramNode>[]) => {
+    if (!locked) onNodesChangeBase(changes);
+  }, [locked, onNodesChangeBase]);
+
+  const onEdgesChange = useCallback((changes: Parameters<typeof onEdgesChangeBase>[0]) => {
+    if (!locked) onEdgesChangeBase(changes);
+  }, [locked, onEdgesChangeBase]);
+
+  const onConnect = useCallback((connection: Connection) => {
+    if (locked) return;
+    setEdges(current => addEdge({
+      ...connection,
+      markerEnd: { type: MarkerType.ArrowClosed },
+      style: { strokeWidth: 2 },
+    }, current));
+  }, [locked, setEdges]);
+
+  const addNode = useCallback((label: string, color: string, kind: DiagramNodeKind) => {
+    if (locked) return;
+    setNodes(current => [
+      ...current,
+      createDiagramNode(label, {
+        x: 120 + current.length * 28,
+        y: 120 + current.length * 24,
+      }, color, kind),
+    ]);
+  }, [locked, setNodes]);
+
+  const renameNode: NodeMouseHandler<DiagramNode> = useCallback((_event, node) => {
+    if (locked) return;
+    setRenameDraft({ id: node.id, label: String(node.data.label || '') });
+  }, [locked]);
+
+  const closeRenameModal = useCallback(() => {
+    setRenameDraft(null);
+  }, []);
+
+  const submitRename = useCallback((event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!renameDraft) return;
+    const label = renameDraft.label.trim() || 'Untitled';
+    setNodes(current => current.map(item => item.id === renameDraft.id
+      ? withDiagramNodeStyle({ ...item, data: { ...item.data, label } })
+      : item));
+    setRenameDraft(null);
+  }, [renameDraft, setNodes]);
+
+  const setSelectedColor = useCallback((color: string) => {
+    if (locked || selected.nodeIds.length === 0) return;
+    setNodes(current => current.map(node => selected.nodeIds.includes(node.id)
+      ? withDiagramNodeStyle({ ...node, data: { ...node.data, color }, style: { ...(node.style || {}), background: color } })
+      : node));
+  }, [locked, selected.nodeIds, setNodes]);
+
+  const deleteSelected = useCallback(() => {
+    if (locked) return;
+    setNodes(current => current.filter(node => !selected.nodeIds.includes(node.id)));
+    setEdges(current => current.filter(edge => !selected.edgeIds.includes(edge.id) && !selected.nodeIds.includes(edge.source) && !selected.nodeIds.includes(edge.target)));
+    setSelected({ nodeIds: [], edgeIds: [] });
+  }, [locked, selected, setNodes, setEdges]);
+
+  const selectionHandler = useCallback(({ nodes: selectedNodes, edges: selectedEdges }: OnSelectionChangeParams<DiagramNode, DiagramEdge>) => {
+    setSelected({
+      nodeIds: selectedNodes.map(node => node.id),
+      edgeIds: selectedEdges.map(edge => edge.id),
+    });
+  }, []);
+
+  const nodeTypes = useMemo(() => ({ yoinko: DiagramFlowNode }), []);
+  const defaultEdgeOptions = useMemo(() => ({
+    markerEnd: { type: MarkerType.ArrowClosed },
+    style: { strokeWidth: 2 },
+  }), []);
+  const selectedColor = nodes.find(node => selected.nodeIds.includes(node.id))?.data.color || '#fff3bf';
+
+  return React.createElement('div', { className: 'diagram-flow-shell' },
+    React.createElement('div', { className: 'tool-actions diagram-flow-actions' },
+      React.createElement('button', { className: 'btn btn-sm btn-ghost', onClick: () => addNode('New box', '#d0ebff', 'box'), disabled: locked }, 'Add Box'),
+      React.createElement('button', { className: 'btn btn-sm btn-ghost', onClick: () => addNode('Note', '#fff3bf', 'note'), disabled: locked }, 'Add Note'),
+      React.createElement('button', { className: 'btn btn-sm btn-ghost', onClick: () => addNode('Text', 'transparent', 'text'), disabled: locked }, 'Add Text'),
+      React.createElement('label', { className: 'diagram-color-control' },
+        React.createElement('span', null, 'Color'),
+        React.createElement('input', {
+          type: 'color',
+          value: selectedColor,
+          onChange: (event: React.ChangeEvent<HTMLInputElement>) => setSelectedColor(event.currentTarget.value),
+          disabled: locked || selected.nodeIds.length === 0,
+        })),
+      React.createElement('button', {
+        className: 'btn btn-sm btn-ghost',
+        onClick: deleteSelected,
+        disabled: locked || (selected.nodeIds.length === 0 && selected.edgeIds.length === 0),
+      }, 'Delete Selected')),
+    React.createElement('div', { className: 'diagram-flow-canvas' },
+      React.createElement(ReactFlow<DiagramNode, DiagramEdge>, {
+        nodes,
+        edges,
+        nodeTypes,
+        onNodesChange,
+        onEdgesChange,
+        onConnect,
+        onNodeDoubleClick: renameNode,
+        onSelectionChange: selectionHandler,
+        defaultEdgeOptions,
+        fitView: true,
+        nodesDraggable: !locked,
+        nodesConnectable: !locked,
+        edgesReconnectable: !locked,
+        elementsSelectable: true,
+        panOnScroll: true,
+        selectionOnDrag: !locked,
+        proOptions: { hideAttribution: true },
+        children: [
+          React.createElement(Background, { key: 'background', gap: 24, color: 'rgba(21,21,21,.16)' }),
+          React.createElement(MiniMap, { key: 'minimap', pannable: true, zoomable: true }),
+          React.createElement(Controls, { key: 'controls', showInteractive: !locked }),
+        ],
+      })),
+    renameDraft ? React.createElement('div', { className: 'diagram-modal-backdrop', role: 'presentation', onMouseDown: closeRenameModal },
+      React.createElement('form', {
+        className: 'diagram-modal',
+        role: 'dialog',
+        'aria-modal': 'true',
+        'aria-labelledby': 'diagram-rename-title',
+        onSubmit: submitRename,
+        onMouseDown: (event: React.MouseEvent) => event.stopPropagation(),
+      },
+        React.createElement('h3', { id: 'diagram-rename-title' }, 'Rename Node'),
+        React.createElement('input', {
+          ref: renameInputRef,
+          value: renameDraft.label,
+          onChange: (event: React.ChangeEvent<HTMLInputElement>) => setRenameDraft({ ...renameDraft, label: event.currentTarget.value }),
+          maxLength: 120,
+        }),
+        React.createElement('div', { className: 'diagram-modal-actions' },
+          React.createElement('button', { type: 'button', className: 'btn btn-sm btn-ghost', onClick: closeRenameModal }, 'Cancel'),
+          React.createElement('button', { type: 'submit', className: 'btn btn-sm btn-primary' }, 'Save')))) : null);
+}
+
+function renderKanbanEditor(page: PageNode, container: HTMLElement): void {
+  const locked = !!page.locked;
+  const doc = parseJson<KanbanDoc>(page.content, { tasks: [] });
+  const assignmentsEnabled = isCloudPlusPlan();
+  renderToolShell(container, toolPageTitle(page), locked, '<div id="kanban-kit-root" class="kanban-kit-root"></div>');
+  container.classList.add('kanban-tool-page');
+  const host = $('kanban-kit-root');
+  kanbanRoot = createRoot(host);
+  const renderBoard = (members: TeamMember[], membersLoading: boolean) => {
+    kanbanRoot?.render(React.createElement(KanbanKitEditor, {
+      initialDoc: doc,
+      locked,
+      assignableMembers: members,
+      assignmentsEnabled,
+      membersLoading,
+      onSave: async (nextDoc: KanbanDoc) => {
+        if (!state.currentPage || state.currentPage.locked) return;
+        state.currentPage.content = JSON.stringify(nextDoc, null, 2);
+        await saveToolDoc(nextDoc);
+      },
+    }));
+  };
+
+  renderBoard(assignmentsEnabled ? kanbanAssignableMembers : [], assignmentsEnabled && !kanbanAssignableMembersLoaded);
+
+  if (assignmentsEnabled && !kanbanAssignableMembersLoaded) {
+    void loadKanbanAssignableMembers().then(members => {
+      if (state.currentPageId !== page.id || !kanbanRoot) return;
+      renderBoard(members, false);
+    });
+  }
+}
+
+const KANBAN_COLUMN_TONES = ['tomato', 'mustard', 'sky', 'mint', 'plum'] as const;
+
+function kanbanIcon(name: 'plus' | 'trash' | 'grip' | 'flag' | 'columns' | 'user'): React.ReactElement {
+  const common = {
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 2,
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+    'aria-hidden': true,
+  };
+  const paths: Record<typeof name, React.ReactNode[]> = {
+    plus: [
+      React.createElement('path', { key: 'h', d: 'M 5 12 H 19' }),
+      React.createElement('path', { key: 'v', d: 'M 12 5 V 19' }),
+    ],
+    trash: [
+      React.createElement('path', { key: 'lid', d: 'M 4 7 H 20' }),
+      React.createElement('path', { key: 'can', d: 'M 10 11 V 17' }),
+      React.createElement('path', { key: 'can2', d: 'M 14 11 V 17' }),
+      React.createElement('path', { key: 'box', d: 'M 6 7 L 7 20 H 17 L 18 7' }),
+      React.createElement('path', { key: 'top', d: 'M 9 7 V 4 H 15 V 7' }),
+    ],
+    grip: [
+      React.createElement('path', { key: 'a', d: 'M 8 6 H 8.01' }),
+      React.createElement('path', { key: 'b', d: 'M 8 12 H 8.01' }),
+      React.createElement('path', { key: 'c', d: 'M 8 18 H 8.01' }),
+      React.createElement('path', { key: 'd', d: 'M 16 6 H 16.01' }),
+      React.createElement('path', { key: 'e', d: 'M 16 12 H 16.01' }),
+      React.createElement('path', { key: 'f', d: 'M 16 18 H 16.01' }),
+    ],
+    flag: [
+      React.createElement('path', { key: 'pole', d: 'M 6 21 V 5' }),
+      React.createElement('path', { key: 'flag', d: 'M 6 5 H 17 L 15 10 L 17 15 H 6' }),
+    ],
+    columns: [
+      React.createElement('rect', { key: 'a', x: 4, y: 5, width: 5, height: 14, rx: 1 }),
+      React.createElement('rect', { key: 'b', x: 11, y: 5, width: 5, height: 14, rx: 1 }),
+      React.createElement('path', { key: 'c', d: 'M 20 7 V 17' }),
+    ],
+    user: [
+      React.createElement('circle', { key: 'head', cx: 12, cy: 8, r: 4 }),
+      React.createElement('path', { key: 'body', d: 'M 4 21 C 5.4 16.8 8.2 15 12 15 C 15.8 15 18.6 16.8 20 21' }),
+    ],
+  };
+  return React.createElement('svg', common, paths[name]);
+}
+
+function kanbanPriorityLabel(priority: Priority | undefined): string {
+  return priority === 'high' ? 'High' : priority === 'low' ? 'Low' : 'Medium';
+}
+
+function kanbanMemberInitials(email: string): string {
+  const local = email.split('@')[0]?.replace(/[._-]+/g, ' ').trim() || email;
+  const parts = local.split(/\s+/).filter(Boolean);
+  const initials = (parts[0]?.[0] || '') + (parts[1]?.[0] || '');
+  return (initials || local.slice(0, 2) || '?').toUpperCase();
+}
+
+function kanbanMemberLabel(member: TeamMember): string {
+  return member.user_id === state.currentUser?.user_id ? 'Me' : member.email;
+}
+
+function kanbanAssigneeOptions(members: TeamMember[], content: KanbanCardContent): TeamMember[] {
+  if (!content.assignee_id) return members;
+  if (members.some(member => member.user_id === content.assignee_id)) return members;
+  return [{
+    user_id: content.assignee_id,
+    email: content.assignee_email || 'Unknown member',
+  }, ...members];
+}
+
+function kanbanColumnToneClass(columnIds: string[], columnId: string): string {
+  const index = Math.max(0, columnIds.indexOf(columnId));
+  return `kanban-tone-${KANBAN_COLUMN_TONES[index % KANBAN_COLUMN_TONES.length]}`;
+}
+
+function KanbanTaskCard({
+  card,
+  locked,
+  assignableMembers,
+  assignmentsEnabled,
+  membersLoading,
+  onUpdate,
+  onDelete,
+}: {
+  card: BoardItem;
+  locked: boolean;
+  assignableMembers: TeamMember[];
+  assignmentsEnabled: boolean;
+  membersLoading: boolean;
+  onUpdate: (id: string, patch: Partial<KanbanTask>) => void;
+  onDelete: (id: string) => void;
+}): React.ReactElement {
+  const content = (card.content || {}) as KanbanCardContent;
+  const priority = content.priority || 'medium';
+  const stopPointer = (event: React.PointerEvent<HTMLElement>) => event.stopPropagation();
+  const stopClick = (event: React.MouseEvent<HTMLElement>) => event.stopPropagation();
+  const priorities: Priority[] = ['low', 'medium', 'high'];
+  const assigneeOptions = kanbanAssigneeOptions(assignableMembers, content);
+  const selectedAssignee = assigneeOptions.find(member => member.user_id === content.assignee_id);
+  const assigneeSelectDisabled = locked || membersLoading || (!assigneeOptions.length && !content.assignee_id);
+  return React.createElement(
+    'article',
+    { className: `kanban-kit-card priority-${priority}` },
+    React.createElement(
+      'div',
+      { className: 'kanban-kit-card-top' },
+      React.createElement(
+        'label',
+        { className: 'kanban-title-field' },
+        React.createElement('span', null, 'Title'),
+        React.createElement('input', {
+          className: 'kanban-kit-title',
+          value: card.title,
+          disabled: locked,
+          onPointerDown: stopPointer,
+          onChange: (event: React.ChangeEvent<HTMLInputElement>) => onUpdate(card.id, { title: event.currentTarget.value }),
+        }),
+      ),
+      React.createElement('button', {
+        type: 'button',
+        className: 'kanban-kit-delete',
+        disabled: locked,
+        title: 'Delete task',
+        'aria-label': 'Delete task',
+        onPointerDown: stopPointer,
+        onClick: () => onDelete(card.id),
+      }, kanbanIcon('trash')),
+    ),
+    React.createElement('div', { className: 'kanban-ticket-divider', 'aria-hidden': true }),
+    React.createElement(
+      'div',
+      { className: 'kanban-kit-card-footer' },
+      React.createElement(
+        'div',
+        { className: 'kanban-field kanban-field-priority', role: 'group', 'aria-label': 'Priority' },
+        React.createElement('span', null, kanbanIcon('flag'), 'Priority'),
+        React.createElement(
+          'div',
+          { className: 'kanban-priority-control' },
+          priorities.map(item => React.createElement('button', {
+            key: item,
+            type: 'button',
+            className: `kanban-priority-option priority-${item}${priority === item ? ' is-selected' : ''}`,
+            disabled: locked,
+            'aria-pressed': priority === item,
+            onPointerDown: stopPointer,
+            onClick: (event: React.MouseEvent<HTMLButtonElement>) => {
+              stopClick(event);
+              onUpdate(card.id, { priority: item });
+            },
+          },
+            React.createElement('span', { className: `kanban-priority-dot priority-${item}`, 'aria-hidden': true }),
+            React.createElement('span', null, kanbanPriorityLabel(item)),
+          )),
+        ),
+      ),
+      assignmentsEnabled ? React.createElement(
+        'div',
+        { className: 'kanban-field kanban-field-assignee' },
+        React.createElement('span', null, kanbanIcon('user'), 'Assignee'),
+        React.createElement(
+          'div',
+          { className: 'kanban-assignee-control' },
+          React.createElement(
+            'span',
+            { className: `kanban-assignee-avatar${selectedAssignee ? '' : ' is-empty'}`, 'aria-hidden': true },
+            selectedAssignee ? kanbanMemberInitials(selectedAssignee.email) : '-',
+          ),
+          React.createElement(
+            'select',
+            {
+              className: 'kanban-assignee-select',
+              value: content.assignee_id || '',
+              disabled: assigneeSelectDisabled,
+              'aria-label': 'Assignee',
+              onPointerDown: stopPointer,
+              onClick: stopClick,
+              onChange: (event: React.ChangeEvent<HTMLSelectElement>) => {
+                const member = assigneeOptions.find(item => item.user_id === event.currentTarget.value);
+                onUpdate(card.id, {
+                  assignee_id: member?.user_id || '',
+                  assignee_email: member?.email || '',
+                });
+              },
+            },
+            React.createElement('option', { value: '' }, membersLoading ? 'Loading members...' : 'Unassigned'),
+            assigneeOptions.map(member => React.createElement('option', {
+              key: member.user_id,
+              value: member.user_id,
+            }, kanbanMemberLabel(member))),
+          ),
+        ),
+      ) : null,
+    ),
+  );
+}
+
+function KanbanKitEditor({ initialDoc, locked, assignableMembers, assignmentsEnabled, membersLoading, onSave }: KanbanReactProps): React.ReactElement {
+  const [dataSource, setDataSource] = useState<BoardData>(() => kanbanDocToBoardData(initialDoc));
+  const columnIds = dataSource.root?.children || [];
+  const columns = columnIds
+    .map(columnId => dataSource[columnId])
+    .filter((column): column is BoardItem => !!column);
+  const cards = Object.values(dataSource).filter((item): item is BoardItem => !!item && item.type === 'card');
+  const highPriorityCount = cards.filter(card => ((card.content || {}) as KanbanCardContent).priority === 'high').length;
+  const assignedCount = cards.filter(card => !!((card.content || {}) as KanbanCardContent).assignee_id).length;
+
+  const commitBoard = useCallback((nextDataSource: BoardData) => {
+    const normalized = normalizeKanbanBoardData(nextDataSource);
+    setDataSource(normalized);
+    void onSave(boardDataToKanbanDoc(normalized));
+  }, [onSave]);
+
+  const updateTask = useCallback((id: string, patch: Partial<KanbanTask>) => {
+    if (locked) return;
+    const task = dataSource[id];
+    if (!task) return;
+    const content = {
+      ...((task.content || {}) as KanbanCardContent),
+    };
+    if (patch.priority !== undefined) {
+      content.priority = patch.priority;
+    }
+    if (patch.assignee_id !== undefined) {
+      if (patch.assignee_id) {
+        content.assignee_id = patch.assignee_id;
+        content.assignee_email = patch.assignee_email || '';
+      } else {
+        delete content.assignee_id;
+        delete content.assignee_email;
+      }
+    }
+    commitBoard({
+      ...dataSource,
+      [id]: {
+        ...task,
+        title: patch.title ?? task.title,
+        content,
+      },
+    });
+  }, [commitBoard, dataSource, locked]);
+
+  const updateColumnTitle = useCallback((id: string, title: string) => {
+    if (locked) return;
+    const column = dataSource[id];
+    if (!column || column.parentId !== 'root') return;
+    commitBoard({
+      ...dataSource,
+      [id]: {
+        ...column,
+        title,
+      },
+    });
+  }, [commitBoard, dataSource, locked]);
+
+  const deleteTask = useCallback((id: string) => {
+    if (locked) return;
+    const task = dataSource[id];
+    if (!task?.parentId) return;
+    const parent = dataSource[task.parentId];
+    if (!parent) return;
+    const { [id]: _removed, ...withoutTask } = dataSource;
+    const children = parent.children.filter(childId => childId !== id);
+    commitBoard({
+      ...withoutTask,
+      [parent.id]: {
+        ...parent,
+        children,
+        totalChildrenCount: children.length,
+      },
+    } as BoardData);
+  }, [commitBoard, dataSource, locked]);
+
+  const addTask = useCallback((column: BoardItem) => {
+    if (locked) return;
+    openTextInputModal('Add Task', '', title => {
+      const id = uid('task');
+      const children = [...column.children, id];
+      commitBoard({
+        ...dataSource,
+        [column.id]: {
+          ...column,
+          children,
+          totalChildrenCount: children.length,
+        },
+        [id]: {
+          id,
+          title,
+          parentId: column.id,
+          children: [],
+          totalChildrenCount: 0,
+          type: 'card',
+          content: { priority: 'medium' } satisfies KanbanCardContent,
+        },
+      });
+    });
+  }, [commitBoard, dataSource, locked]);
+
+  const addColumn = useCallback(() => {
+    if (locked) return;
+    openTextInputModal('Add Column', '', title => {
+      const id = uid('column');
+      commitBoard({
+        ...dataSource,
+        root: {
+          ...dataSource.root,
+          children: [...(dataSource.root?.children || []), id],
+          totalChildrenCount: (dataSource.root?.children || []).length + 1,
+        },
+        [id]: {
+          id,
+          title,
+          parentId: 'root',
+          children: [],
+          totalChildrenCount: 0,
+          isDraggable: true,
+        },
+      });
+    });
+  }, [commitBoard, dataSource, locked]);
+
+  const deleteColumn = useCallback((columnId: string) => {
+    if (locked) return;
+    const column = dataSource[columnId];
+    if (!column || column.parentId !== 'root') return;
+    const rootChildren = (dataSource.root?.children || []).filter(id => id !== columnId);
+    if (!rootChildren.length) {
+      showToast('Keep at least one column', 'error');
+      return;
+    }
+    void showConfirmDelete(column.title, 'Delete column?').then(confirmed => {
+      if (!confirmed) return;
+      const nextDataSource = { ...dataSource };
+      delete nextDataSource[columnId];
+      for (const taskId of column.children || []) delete nextDataSource[taskId];
+      nextDataSource.root = {
+        ...dataSource.root,
+        children: rootChildren,
+        totalChildrenCount: rootChildren.length,
+      };
+      commitBoard(nextDataSource);
+    });
+  }, [commitBoard, dataSource, locked]);
+
+  const onCardMove = useCallback((move: KanbanKitDropCardParams) => {
+    if (locked) return;
+    commitBoard(dropHandler(
+      move,
+      dataSource,
+      (_targetColumn, droppedItem: BoardItem) => ({ ...droppedItem, parentId: move.toColumnId }),
+    ) as BoardData);
+  }, [commitBoard, dataSource, locked]);
+
+  const onColumnMove = useCallback((move: KanbanKitDropColumnParams) => {
+    if (locked) return;
+    commitBoard(dropColumnHandler(move, dataSource) as BoardData);
+  }, [commitBoard, dataSource, locked]);
+
+  const configMap = useMemo<KanbanKitConfigMap>(() => ({
+    card: {
+      isDraggable: !locked,
+      render: ({ data }) => React.createElement(KanbanTaskCard, {
+        card: data,
+        locked,
+        assignableMembers,
+        assignmentsEnabled,
+        membersLoading,
+        onUpdate: updateTask,
+        onDelete: deleteTask,
+      }),
+    },
+  }), [assignableMembers, assignmentsEnabled, deleteTask, locked, membersLoading, updateTask]);
+
+  return React.createElement('section', { className: `kanban-workbench${locked ? ' is-locked' : ''}` },
+    React.createElement('div', { className: 'kanban-workbench-head' },
+      React.createElement('div', { className: 'kanban-workbench-title' },
+        React.createElement('span', { className: 'kanban-kicker' }, `${columns.length} lanes`),
+        React.createElement('h3', null, cards.length ? `${cards.length} tasks in motion` : 'No tasks yet')),
+      React.createElement('div', { className: 'kanban-stat-strip', 'aria-label': 'Board summary' },
+        React.createElement('div', { className: 'kanban-stat' },
+          React.createElement('span', null, 'Tasks'),
+          React.createElement('strong', null, String(cards.length))),
+        React.createElement('div', { className: 'kanban-stat is-hot' },
+          React.createElement('span', null, 'High'),
+          React.createElement('strong', null, String(highPriorityCount))),
+        assignmentsEnabled ? React.createElement('div', { className: 'kanban-stat is-assigned' },
+          React.createElement('span', null, 'Assigned'),
+          React.createElement('strong', null, String(assignedCount))) : null,
+        React.createElement('div', { className: 'kanban-stat' },
+          React.createElement('span', null, 'Lanes'),
+          React.createElement('strong', null, String(columns.length)))),
+      !locked ? React.createElement('button', {
+        type: 'button',
+        className: 'kanban-toolbar-btn',
+        onClick: addColumn,
+      }, kanbanIcon('columns'), 'Add Column') : null),
+    React.createElement(Kanban, {
+      dataSource,
+      configMap,
+      viewOnly: locked,
+      rootClassName: 'yoinko-kanban-kit',
+      columnWrapperClassName: column => `kanban-kit-column-wrap ${kanbanColumnToneClass(columnIds, column.id)}${column.children.length ? '' : ' is-empty'}`,
+      columnClassName: () => 'kanban-kit-column-shell',
+      columnListContentClassName: () => 'kanban-kit-column-list',
+      virtualization: false,
+      cardsGap: 14,
+      onCardMove,
+      allowColumnDrag: !locked,
+      onColumnMove,
+      renderColumnHeader: column => React.createElement('div', { className: 'kanban-kit-column-head' },
+        React.createElement('div', { className: 'kanban-kit-column-label' },
+          React.createElement('span', { className: 'kanban-column-grip', title: locked ? undefined : 'Drag lane' }, kanbanIcon('grip')),
+          React.createElement('input', {
+            className: 'kanban-kit-column-title kanban-kit-column-title-input',
+            value: column.title,
+            disabled: locked,
+            placeholder: 'Column name',
+            'aria-label': 'Column name',
+            onPointerDown: (event: React.PointerEvent<HTMLInputElement>) => event.stopPropagation(),
+            onClick: (event: React.MouseEvent<HTMLInputElement>) => event.stopPropagation(),
+            onChange: (event: React.ChangeEvent<HTMLInputElement>) => updateColumnTitle(column.id, event.currentTarget.value),
+          })),
+        React.createElement('div', { className: 'kanban-kit-column-actions' },
+          React.createElement('span', { className: 'kanban-kit-count' }, String(column.totalChildrenCount)),
+          !locked ? React.createElement('button', {
+            type: 'button',
+            className: 'kanban-kit-delete-column',
+            title: 'Delete column',
+            'aria-label': 'Delete column',
+            onClick: (event: React.MouseEvent<HTMLButtonElement>) => {
+              event.stopPropagation();
+              deleteColumn(column.id);
+            },
+          }, kanbanIcon('trash')) : null)),
+      allowListFooter: () => !locked,
+      renderListFooter: column => React.createElement('div', { className: 'kanban-kit-list-footer' },
+        !column.children.length ? React.createElement('div', { className: 'kanban-empty-lane' }, 'No tasks') : null,
+        React.createElement('button', {
+          type: 'button',
+          className: 'kanban-kit-add-card',
+          onClick: () => addTask(column),
+        }, kanbanIcon('plus'), 'Add task')),
+      allowColumnAdder: false,
+      renderCardDragIndicator: () => React.createElement('div', { className: 'kanban-kit-card-indicator' }),
+      renderColumnDragIndicator: (_column, info) => React.createElement('div', {
+        className: `kanban-kit-column-indicator is-${info.edge}`,
+        style: { width: info.width, height: info.height },
+      }),
+    }));
+}
+
+function sheetIcon(name: 'rows' | 'columns' | 'row-plus' | 'column-plus' | 'sheet-plus' | 'search' | 'filter'): string {
+  const yk = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
+  const icons = {
+    rows: `<svg ${yk}><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M 4 10 H 20"/><path d="M 4 15 H 20"/></svg>`,
+    columns: `<svg ${yk}><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M 10 5 V 19"/><path d="M 15 5 V 19"/></svg>`,
+    'row-plus': `<svg ${yk}><rect x="4" y="5" width="16" height="11" rx="2"/><path d="M 4 10 H 20"/><path d="M 12 19 V 23"/><path d="M 10 21 H 14"/></svg>`,
+    'column-plus': `<svg ${yk}><rect x="4" y="5" width="11" height="14" rx="2"/><path d="M 9 5 V 19"/><path d="M 19 10 V 14"/><path d="M 17 12 H 21"/></svg>`,
+    'sheet-plus': `<svg ${yk}><rect x="4" y="4" width="13" height="16" rx="2"/><path d="M 8 8 H 13"/><path d="M 8 12 H 13"/><path d="M 18 13 V 19"/><path d="M 15 16 H 21"/></svg>`,
+    search: `<svg ${yk}><circle cx="11" cy="11" r="6"/><path d="M 16 16 L 21 21"/></svg>`,
+    filter: `<svg ${yk}><path d="M 4 5 H 20 L 14 12 V 19 L 10 21 V 12 Z"/></svg>`,
+  };
+  return icons[name];
+}
+
+function renderSheetEditor(page: PageNode, container: HTMLElement): void {
+  const locked = !!page.locked;
+  const doc = parseJson<SheetDoc>(page.content, { cells: [['']] });
+  const sheets = normalizeSheetTabs(doc);
+  const firstCells = normalizeSheetCells(sheets[0]?.cells);
+  const rowCount = firstCells.length;
+  const colCount = firstCells[0]?.length || 1;
+  renderToolShell(container, 'Spreadsheet', locked, `
+    <div class="sheet-workbench">
+      <div class="sheet-control-bar">
+        <div class="sheet-stats" aria-label="Sheet size">
+          <span>${sheetIcon('rows')}<strong id="sheet-row-count">${rowCount}</strong> Rows</span>
+          <span>${sheetIcon('columns')}<strong id="sheet-column-count">${colCount}</strong> Columns</span>
+          <span>${sheetIcon('filter')} Filters</span>
+        </div>
+        <label class="sheet-search-field" for="sheet-search-input">
+          ${sheetIcon('search')}
+          <input id="sheet-search-input" type="search" placeholder="Search sheet" autocomplete="off" spellcheck="false">
+        </label>
+        <div class="tool-actions sheet-actions">
+          <button id="sheet-add-row-btn" class="btn btn-sm btn-ghost sheet-action-btn" ${locked ? 'disabled' : ''}>${sheetIcon('row-plus')}Add Row</button>
+          <button id="sheet-add-column-btn" class="btn btn-sm btn-ghost sheet-action-btn" ${locked ? 'disabled' : ''}>${sheetIcon('column-plus')}Add Column</button>
+          <button id="sheet-add-sheet-btn" class="btn btn-sm btn-ghost sheet-action-btn" ${locked ? 'disabled' : ''}>${sheetIcon('sheet-plus')}Add Sheet</button>
+        </div>
+      </div>
+      <div class="sheet-wrap"><div id="sheet-grid-root" class="sheet-grid-root"></div></div>
+    </div>
+  `);
+  container.classList.add('sheet-tool-page');
+
+  $('sheet-add-row-btn')?.addEventListener('click', addSheetRow);
+  $('sheet-add-column-btn')?.addEventListener('click', addSheetColumn);
+  $('sheet-add-sheet-btn')?.addEventListener('click', addSheet);
+  $('sheet-search-input')?.addEventListener('input', () => handleSheetSearch(true));
+
+  sheetHost = $('sheet-grid-root') as HTMLDivElement;
+  sheetPageId = page.id;
+  sheetEventsReady = false;
+  sheetHost.addEventListener('click', () => {
+    setTimeout(() => {
+      syncActiveSheetFromSpreadsheet();
+      bindSheetTabRename();
+    }, 0);
+  });
+
+  const handleSheetMutation = (instance: SheetWorksheet) => {
+    if (!sheetEventsReady) return;
+    updateSheetStats(instance);
+    scheduleSheetSave(instance);
+  };
+
+  const worksheets = jspreadsheet(sheetHost, {
+    about: false,
+    allowExport: true,
+    toolbar: locked ? false : (customizeSheetToolbar as (toolbar: SheetToolbarItem[]) => SheetToolbarItem[]),
+    tabs: true,
+    onload: instance => {
+      sheetSpreadsheet = instance;
+      sheetWorksheet = instance.worksheets[0] || null;
+      sheetEventsReady = true;
+      if (sheetWorksheet) updateSheetStats(sheetWorksheet);
+      bindSheetTabRename();
+    },
+    oncreateworksheet: worksheet => {
+      sheetWorksheet = worksheet;
+      if (!sheetSpreadsheet) sheetSpreadsheet = worksheet.parent;
+      handleSheetSearch(false);
+      handleSheetMutation(worksheet);
+      setTimeout(bindSheetTabRename, 0);
+    },
+    ondeleteworksheet: (_worksheet, index) => {
+      if (sheetSpreadsheet) {
+        sheetWorksheet = sheetSpreadsheet.worksheets[Math.max(0, index - 1)] || sheetSpreadsheet.worksheets[0] || null;
+      }
+      if (sheetWorksheet) handleSheetMutation(sheetWorksheet);
+      setTimeout(bindSheetTabRename, 0);
+    },
+    onfocus: instance => {
+      sheetWorksheet = instance;
+      updateSheetStats(instance);
+    },
+    onafterchanges: instance => handleSheetMutation(instance),
+    oninsertrow: instance => handleSheetMutation(instance),
+    oninsertcolumn: instance => handleSheetMutation(instance),
+    ondeleterow: instance => handleSheetMutation(instance),
+    ondeletecolumn: instance => handleSheetMutation(instance),
+    onmoverow: instance => handleSheetMutation(instance),
+    onmovecolumn: instance => handleSheetMutation(instance),
+    onchangeheader: instance => handleSheetMutation(instance),
+    onchangestyle: instance => handleSheetMutation(instance),
+    onresizecolumn: instance => handleSheetMutation(instance),
+    onresizerow: instance => handleSheetMutation(instance),
+    onsort: instance => handleSheetMutation(instance),
+    worksheets: sheets.map((sheet, index) => createSheetWorksheetOptions(sheet, locked, index)),
+  });
+  sheetWorksheet = worksheets[0] || null;
+  setTimeout(bindSheetTabRename, 0);
+}
+
+function normalizeSheetTabs(doc: SheetDoc): SheetWorksheetDoc[] {
+  const worksheets = Array.isArray(doc.worksheets) ? doc.worksheets : [];
+  const tabs = worksheets.map((sheet, index) => {
+    const name = typeof sheet?.name === 'string' && sheet.name.trim() ? sheet.name.trim() : `Sheet ${index + 1}`;
+    const style = sheet?.style && typeof sheet.style === 'object' && !Array.isArray(sheet.style)
+      ? Object.fromEntries(Object.entries(sheet.style).filter(([, value]) => typeof value === 'string'))
+      : undefined;
+    const columns = Array.isArray(sheet?.columns)
+      ? sheet.columns.map(column => ({
+        title: typeof column?.title === 'string' ? column.title : undefined,
+        width: typeof column?.width === 'string' || typeof column?.width === 'number' ? column.width : undefined,
+      }))
+      : undefined;
+    return { name, cells: normalizeSheetCells(sheet?.cells), style, columns };
+  });
+
+  if (tabs.length) return tabs;
+  return [{ name: 'Sheet 1', cells: normalizeSheetCells(doc.cells) }];
+}
+
+function createSheetWorksheetOptions(sheet: SheetWorksheetDoc, locked: boolean, index = 0): jspreadsheet.WorksheetOptions {
+  const cells = normalizeSheetCells(sheet.cells);
+  const colCount = Math.max(1, cells[0]?.length || 1, sheet.columns?.length || 0);
+  const rowCount = cells.length;
+  const columns: jspreadsheet.Column[] = Array.from({ length: colCount }, (_, columnIndex) => {
+    const savedColumn = sheet.columns?.[columnIndex];
+    return {
+      type: 'text',
+      title: savedColumn?.title,
+      width: savedColumn?.width ?? 150,
+      wordWrap: true,
+    };
+  });
+
+  return {
+    worksheetName: sheet.name || `Sheet ${index + 1}`,
+    data: cells as SheetCellValue[][],
+    columns,
+    style: sheet.style,
+    minDimensions: [colCount, rowCount],
+    tableOverflow: true,
+    tableWidth: '100%',
+    tableHeight: 'calc(100vh - 226px)',
+    filters: true,
+    search: true,
+    editable: !locked,
+    allowInsertColumn: !locked,
+    allowInsertRow: !locked,
+    allowDeleteColumn: !locked,
+    allowDeleteRow: !locked,
+    allowRenameColumn: !locked,
+    columnDrag: !locked,
+    rowDrag: !locked,
+    columnSorting: true,
+    textOverflow: true,
+  };
+}
+
+function normalizeSheetCells(cells: string[][] | undefined): string[][] {
+  const source = Array.isArray(cells) && cells.length ? cells : [['']];
+  const colCount = Math.max(1, ...source.map(row => Array.isArray(row) ? row.length : 0));
+  return source.map(row => {
+    const safeRow = Array.isArray(row) ? row : [];
+    return Array.from({ length: colCount }, (_, index) => String(safeRow[index] ?? ''));
+  });
+}
+
+function createBlankSheetCells(rows = 15, columns = 8): string[][] {
+  return Array.from({ length: rows }, () => Array.from({ length: columns }, () => ''));
+}
+
+function updateSheetStats(instance: SheetWorksheet): void {
+  const cells = sheetCellsFromWorksheet(instance);
+  const rowCount = cells.length;
+  const colCount = cells[0]?.length || 1;
+  const rowStat = $('sheet-row-count');
+  const columnStat = $('sheet-column-count');
+  if (rowStat) rowStat.textContent = String(rowCount);
+  if (columnStat) columnStat.textContent = String(colCount);
+}
+
+function syncActiveSheetFromSpreadsheet(): SheetWorksheet | null {
+  if (!sheetSpreadsheet && sheetHost) {
+    sheetSpreadsheet = (sheetHost as jspreadsheet.JspreadsheetInstanceElement).spreadsheet || null;
+  }
+  if (sheetSpreadsheet) {
+    const activeIndex = sheetSpreadsheet.getWorksheetActive();
+    sheetWorksheet = sheetSpreadsheet.worksheets[activeIndex] || sheetWorksheet;
+  }
+  if (sheetWorksheet) updateSheetStats(sheetWorksheet);
+  return sheetWorksheet;
+}
+
+function handleSheetSearch(resetWhenEmpty = false): void {
+  const worksheet = syncActiveSheetFromSpreadsheet();
+  if (!worksheet) return;
+  const query = (($('sheet-search-input') as HTMLInputElement | null)?.value || '').trim();
+  if (query) worksheet.search(query);
+  else if (resetWhenEmpty) worksheet.resetSearch();
+}
+
+function sheetToolbarContent(item: SheetToolbarItem): string | undefined {
+  const content = (item as { content?: unknown }).content;
+  return typeof content === 'string' ? content : undefined;
+}
+
+function isSheetToolbarDivider(item: SheetToolbarItem): boolean {
+  return (item as { type?: unknown }).type === 'divisor';
+}
+
+function customizeSheetToolbar(defaultToolbar: SheetToolbarItem[] | SheetToolbarConfig): SheetToolbarItem[] | SheetToolbarConfig {
+  const defaultItems = Array.isArray(defaultToolbar)
+    ? defaultToolbar
+    : Array.isArray(defaultToolbar.items)
+      ? defaultToolbar.items
+      : [];
+  const toolbar = defaultItems.flatMap(item => {
+    const content = sheetToolbarContent(item);
+    if (content === 'fullscreen') return [];
+    if (content === 'web') {
+      return [{
+        ...item,
+        tooltip: 'Merge cells',
+        onclick: () => {
+          void openSheetMergeModal();
+        },
+      } as SheetToolbarItem];
+    }
+    return [item];
+  });
+
+  const items = toolbar.filter((item, index, allItems) => {
+    if (!isSheetToolbarDivider(item)) return true;
+    if (index === 0 || index === allItems.length - 1) return false;
+    return !isSheetToolbarDivider(allItems[index - 1]) && !isSheetToolbarDivider(allItems[index + 1]);
+  });
+
+  return Array.isArray(defaultToolbar) ? items : { ...defaultToolbar, items };
+}
+
+function bindSheetTabRename(): void {
+  if (!sheetHost) return;
+  const tabs = sheetHost.querySelectorAll<HTMLElement>(
+    ':scope > .jtabs-headers-container .jtabs-headers > div:not(.jtabs-border)',
+  );
+  tabs.forEach((tab, index) => {
+    if (tab.dataset.ykRenameReady === 'true') return;
+    tab.dataset.ykRenameReady = 'true';
+    tab.title = 'Double-click to rename';
+    tab.addEventListener('dblclick', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      renameSheetAt(index);
+    });
+  });
+}
+
+function renameSheetAt(index?: number): void {
+  if (state.currentPage?.locked) return;
+  const spreadsheet = sheetSpreadsheet || syncActiveSheetFromSpreadsheet()?.parent;
+  if (!spreadsheet) return;
+  const sheetIndex = typeof index === 'number' ? index : spreadsheet.getWorksheetActive();
+  const worksheet = spreadsheet.worksheets[sheetIndex];
+  if (!worksheet) return;
+  const currentName = worksheet.options.worksheetName || `Sheet ${sheetIndex + 1}`;
+
+  openTextInputModal('Rename Sheet', currentName, value => {
+    const nextName = value.trim();
+    if (!nextName || nextName === currentName) return;
+    worksheet.options.worksheetName = nextName;
+    const tab = sheetHost?.querySelectorAll<HTMLElement>(
+      ':scope > .jtabs-headers-container .jtabs-headers > div:not(.jtabs-border)',
+    )[sheetIndex];
+    const label = tab?.querySelector('div') || tab;
+    if (label) label.textContent = nextName;
+    scheduleSheetSave(worksheet);
+  });
+}
+
+function sheetColumnName(index: number): string {
+  let column = '';
+  let current = index + 1;
+  while (current > 0) {
+    const remainder = (current - 1) % 26;
+    column = String.fromCharCode(65 + remainder) + column;
+    current = Math.floor((current - remainder - 1) / 26);
+  }
+  return column;
+}
+
+function sheetCellName(column: number, row: number): string {
+  return `${sheetColumnName(column)}${row + 1}`;
+}
+
+async function openSheetMergeModal(): Promise<void> {
+  const worksheet = syncActiveSheetFromSpreadsheet();
+  if (!worksheet || state.currentPage?.locked) return;
+  const selected = worksheet.selectedCell;
+  if (!selected) {
+    showToast('Select a range before merging.', 'error');
+    return;
+  }
+
+  const coords = selected.map(value => Number(value));
+  if (coords.some(value => !Number.isFinite(value))) return;
+  const [x1, y1, x2, y2] = coords;
+  const left = Math.min(x1, x2);
+  const right = Math.max(x1, x2);
+  const top = Math.min(y1, y2);
+  const bottom = Math.max(y1, y2);
+  const colspan = right - left + 1;
+  const rowspan = bottom - top + 1;
+  const cellName = sheetCellName(left, top);
+
+  if (colspan <= 1 && rowspan <= 1) {
+    const anchor = worksheet.records[top]?.[left]?.element;
+    if (anchor?.getAttribute('data-merged')) {
+      worksheet.removeMerge(cellName);
+      scheduleSheetSave(worksheet);
+    }
+    return;
+  }
+
+  const confirmed = await showSheetMergeDialog();
+  if (!confirmed) return;
+  worksheet.setMerge(cellName, colspan, rowspan);
+  scheduleSheetSave(worksheet);
+}
+
+function showSheetMergeDialog(): Promise<boolean> {
+  return new Promise(resolve => {
+    const backdrop = document.createElement('div');
+    backdrop.className = 'diagram-modal-backdrop sheet-modal-backdrop';
+    const modal = document.createElement('div');
+    modal.className = 'diagram-modal sheet-confirm-modal';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+
+    const heading = document.createElement('h3');
+    heading.textContent = 'Merge cells?';
+    const message = document.createElement('p');
+    message.textContent = 'The merged cells will retain the value from the top-left cell only.';
+
+    const actions = document.createElement('div');
+    actions.className = 'diagram-modal-actions';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'btn btn-sm btn-ghost';
+    cancel.textContent = 'Cancel';
+    const merge = document.createElement('button');
+    merge.type = 'button';
+    merge.className = 'btn btn-sm btn-primary';
+    merge.textContent = 'Merge';
+
+    function close(result: boolean): void {
+      backdrop.remove();
+      resolve(result);
+    }
+
+    backdrop.addEventListener('mousedown', event => {
+      if (event.target === backdrop) close(false);
+    });
+    cancel.addEventListener('click', () => close(false));
+    merge.addEventListener('click', () => close(true));
+    actions.append(cancel, merge);
+    modal.append(heading, message, actions);
+    backdrop.appendChild(modal);
+    document.body.appendChild(backdrop);
+    merge.focus();
+  });
+}
+
+function sheetCellsFromWorksheet(instance: SheetWorksheet): string[][] {
+  const raw = instance.getData(false, true);
+  return normalizeSheetCells(raw.map(row => row.map(value => value == null ? '' : String(value))));
+}
+
+function sheetColumnsFromWorksheet(instance: SheetWorksheet): SheetColumnDoc[] {
+  return (instance.options.columns || []).map(column => ({
+    title: typeof column.title === 'string' ? column.title : undefined,
+    width: column.width,
+  }));
+}
+
+function sheetDocFromSpreadsheet(spreadsheet: SheetSpreadsheet): SheetDoc {
+  const worksheets = spreadsheet.worksheets.map((worksheet, index) => {
+    const style = worksheet.getStyle();
+    const tab: SheetWorksheetDoc = {
+      name: worksheet.options.worksheetName || `Sheet ${index + 1}`,
+      cells: sheetCellsFromWorksheet(worksheet),
+    };
+    const columns = sheetColumnsFromWorksheet(worksheet);
+    if (columns.some(column => column.title || column.width !== undefined)) tab.columns = columns;
+    if (style && typeof style === 'object' && !Array.isArray(style) && Object.keys(style).length) {
+      tab.style = style as Record<string, string>;
+    }
+    return tab;
+  });
+
+  return {
+    cells: worksheets[0]?.cells || [['']],
+    worksheets,
+  };
+}
+
+function scheduleSheetSave(instance: SheetWorksheet): void {
+  if (!sheetPageId || state.currentPage?.locked) return;
+  if (sheetSaveTimer) clearTimeout(sheetSaveTimer);
+  const pageId = sheetPageId;
+  sheetSaveTimer = setTimeout(() => {
+    sheetSaveTimer = undefined;
+    void saveSheetFromInstance(pageId, instance);
+  }, 180);
+}
+
+async function saveSheetFromInstance(pageId: string, instance: SheetWorksheet): Promise<void> {
+  const doc = sheetDocFromSpreadsheet(sheetSpreadsheet || instance.parent);
+  const content = JSON.stringify(doc, null, 2);
+  if (state.currentPageId === pageId) showSavingState();
+  try {
+    await api.updatePage(pageId, { content });
+    if (state.currentPage?.id === pageId) state.currentPage.content = content;
+    if (state.currentPageId === pageId) showSavedState();
+  } catch (err) {
+    if (state.currentPageId === pageId) {
+      showToast('Save failed: ' + (err as Error).message, 'error');
+      hideSaveState();
+    }
+  }
+}
+
+function addSheetRow(): void {
+  const worksheet = syncActiveSheetFromSpreadsheet();
+  if (!worksheet || state.currentPage?.locked) return;
+  if (worksheet.insertRow(1) !== false) {
+    updateSheetStats(worksheet);
+    scheduleSheetSave(worksheet);
+  }
+}
+
+function addSheetColumn(): void {
+  const worksheet = syncActiveSheetFromSpreadsheet();
+  if (!worksheet || state.currentPage?.locked) return;
+  if (worksheet.insertColumn(1) !== false) {
+    updateSheetStats(worksheet);
+    scheduleSheetSave(worksheet);
+  }
+}
+
+function nextSheetName(): string {
+  const existing = new Set((sheetSpreadsheet?.worksheets || []).map(worksheet => worksheet.options.worksheetName));
+  let index = existing.size + 1;
+  let name = `Sheet ${index}`;
+  while (existing.has(name)) {
+    index += 1;
+    name = `Sheet ${index}`;
+  }
+  return name;
+}
+
+function addSheet(): void {
+  const worksheet = syncActiveSheetFromSpreadsheet();
+  if (!worksheet || state.currentPage?.locked) return;
+  worksheet.createWorksheet(createSheetWorksheetOptions({
+    name: nextSheetName(),
+    cells: createBlankSheetCells(),
+  }, false, sheetSpreadsheet?.worksheets.length || 0));
 }
 
 function showSavingState(): void {
@@ -2300,10 +3950,22 @@ function hideSaveState(): void {
 }
 
 // ── Folder view ───────────────────────────────────────────────────────────────
+function pageFileTypeLabel(fileType: string | undefined): string {
+  switch (fileType) {
+    case 'diagram': return 'DIAGRAM';
+    case 'kanban': return 'TASK BOARD';
+    case 'sheet': return 'SPREADSHEET';
+    case 'html': return 'HTML';
+    case 'md': return 'MD';
+    default: return 'MD';
+  }
+}
+
 function renderFolderView(page: PageNode, container: HTMLElement): void {
   container.className = 'content-area fade-in';
   const children = page.children || [];
   const allPages = state.pages;
+  const canAddChildFolder = canCreateFolderInParent(page.id, allPages);
   const roots = allPages.filter(p => !p.parent_id);
   const rootIdx = roots.findIndex(p => p.id === page.id);
   const sectionNum = rootIdx >= 0 ? String(rootIdx + 1).padStart(2, '0') : (page.num || '—');
@@ -2319,10 +3981,12 @@ function renderFolderView(page: PageNode, container: HTMLElement): void {
         </div>
         <div class="folder-actions">
           <button class="btn btn-sm btn-ghost" onclick="openNewPageModal('page','${page.id}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 5 3 H 13 L 18 8 V 21 H 5 Z"/><path d="M 13 3 V 8 H 18"/><path d="M 11.5 16 H 14.5"/><path d="M 13 14.5 V 17.5"/></svg> Add Page</button>
-          <button class="btn btn-sm btn-ghost" onclick="openNewPageModal('folder','${page.id}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 3 7 V 19 H 21 V 9 H 11 L 9 7 H 3 Z"/></svg> Add Folder</button>
+          ${canAddChildFolder ? `<button class="btn btn-sm btn-ghost" onclick="openNewPageModal('folder','${page.id}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 3 7 V 19 H 21 V 9 H 11 L 9 7 H 3 Z"/></svg> Add Folder</button>` : ''}
           <button class="btn btn-sm btn-ghost" onclick="openNewPageModal('image')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path fill="currentColor" stroke="none" d="M 16 8 Q 16.7 9.7 18.5 10.2 Q 16.7 10.7 16 12.5 Q 15.3 10.7 13.5 10.2 Q 15.3 9.7 16 8 Z"/><path d="M 4 17 L 9 13 L 13 16 L 17 13"/></svg> Add Image</button>
         </div>
       </div>
+
+      ${renderPriorityTodoSection(page)}
 
       <div class="folder-search-bar">
         <div class="folder-search-wrap">
@@ -2336,40 +4000,50 @@ function renderFolderView(page: PageNode, container: HTMLElement): void {
       </div>
 
       ${children.length ? (() => {
-    const folders = children.filter(c => c.type === 'folder');
-    const mdPages = children.filter(c => c.type !== 'folder' && (c.file_type || 'md') === 'md');
-    const htmlPages = children.filter(c => c.type !== 'folder' && c.file_type === 'html');
+      const folders = children.filter(c => c.type === 'folder');
+      const mdPages = children.filter(c => c.type !== 'folder' && (c.file_type || 'md') === 'md');
+      const htmlPages = children.filter(c => c.type !== 'folder' && c.file_type === 'html');
+      const toolPages = children.filter(c => c.type !== 'folder' && (
+        c.file_type === 'diagram' || c.file_type === 'kanban' || c.file_type === 'sheet'
+      ));
 
-    const renderChildCard = (child: PageNode) => {
-      const childName = child.display_name || child.name;
-      const ext = child.file_type || '';
-      return `
+      const renderChildCard = (child: PageNode) => {
+        const childName = child.display_name || child.name;
+        const ext = child.file_type || '';
+        return `
         <div class="child-card" data-filter-name="${esc(childName.toLowerCase())}" onclick="navigateTo('${child.id}')">
           <div class="child-card-icon ${child.type === 'folder' ? 'folder' : ext}">
             ${child.type === 'folder'
-              ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 3 7 V 19 H 21 V 9 H 11 L 9 7 H 3 Z"/></svg>`
-              : ext === 'html'
-                ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 6 3 H 14 L 19 8 V 21 H 6 Z"/><path d="M 14 3 V 8 H 19"/><path d="M 9 12 H 16"/><path d="M 9 15 H 13"/></svg>`
-                : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 6 3 H 14 L 19 8 V 21 H 6 Z"/><path d="M 14 3 V 8 H 19"/><path d="M 9 12 H 16"/><path d="M 9 15 H 16"/><path d="M 9 18 H 13"/></svg>`}
+            ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 3 7 V 19 H 21 V 9 H 11 L 9 7 H 3 Z"/></svg>`
+            : ext === 'html'
+              ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 6 3 H 14 L 19 8 V 21 H 6 Z"/><path d="M 14 3 V 8 H 19"/><path d="M 9 12 H 16"/><path d="M 9 15 H 13"/></svg>`
+              : ext === 'diagram'
+                ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="6" height="6" rx="1.5"/><rect x="14" y="14" width="6" height="6" rx="1.5"/><path d="M 10 7 H 13 C 15 7 16 8 16 10 V 14"/></svg>`
+                : ext === 'kanban'
+                  ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="4" height="16" rx="1.5"/><rect x="10" y="4" width="4" height="10" rx="1.5"/><rect x="16" y="4" width="4" height="13" rx="1.5"/></svg>`
+                  : ext === 'sheet'
+                    ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M 4 10 H 20"/><path d="M 4 15 H 20"/><path d="M 10 4 V 20"/><path d="M 15 4 V 20"/></svg>`
+                    : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 6 3 H 14 L 19 8 V 21 H 6 Z"/><path d="M 14 3 V 8 H 19"/><path d="M 9 12 H 16"/><path d="M 9 15 H 16"/><path d="M 9 18 H 13"/></svg>`}
           </div>
           <div class="child-card-name">${esc(childName)}</div>
-          <div class="child-card-meta">${child.type === 'folder' ? `${(state.pages.filter(p => p.parent_id === child.id).length + ((child as any).asset_count || 0))} items` : ext.toUpperCase() || 'MD'}</div>
+          <div class="child-card-meta">${child.type === 'folder' ? `${(state.pages.filter(p => p.parent_id === child.id).length + ((child as any).asset_count || 0))} items` : pageFileTypeLabel(ext)}</div>
           <button class="child-card-menu-btn" onclick="openChildCardMenu('${child.id}', event)" title="Actions" aria-label="Actions"><svg viewBox="0 0 24 24" fill="none" width="16" height="16"><circle cx="5" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="19" cy="12" r="1.5" fill="currentColor"/></svg></button>
         </div>`;
-    };
+      };
 
-    const section = (label: string, items: PageNode[]) => `
+      const section = (label: string, items: PageNode[]) => `
       <div class="folder-section">
         <div class="section-heading">${label} · ${items.length}</div>
         <div class="children-grid">${items.map(renderChildCard).join('')}</div>
       </div>`;
 
-    return [
-      folders.length ? section('Folders', folders) : '',
-      mdPages.length ? section('Markdown', mdPages) : '',
-      htmlPages.length ? section('HTML', htmlPages) : '',
-    ].join('');
-  })() : `
+      return [
+        folders.length ? section('Folders', folders) : '',
+        mdPages.length ? section('Markdown', mdPages) : '',
+        htmlPages.length ? section('HTML', htmlPages) : '',
+        toolPages.length ? section('Tools', toolPages) : '',
+      ].join('');
+    })() : `
         <div style="color:var(--text-dim);font-size:14px;padding:20px 0;">
           This folder is empty.
           <a href="#" onclick="openNewPageModal('page');return false;" style="color:var(--tomato);text-decoration:none;font-weight:600;">Add a page</a> to get started.
@@ -2381,6 +4055,7 @@ function renderFolderView(page: PageNode, container: HTMLElement): void {
     </div>
   `;
   setupUploadZone(page.id);
+  setupPriorityTodoDragAndDrop(container);
 
   // Wire up the folder filter input
   const folderSearch = document.getElementById('folder-search') as HTMLInputElement | null;
@@ -2424,6 +4099,211 @@ function renderFolderView(page: PageNode, container: HTMLElement): void {
       applyFolderFilter();
     });
   }
+}
+
+const PRIORITY_COLUMNS: Array<{ id: Priority; label: string }> = [
+  { id: 'low', label: 'Low' },
+  { id: 'medium', label: 'Medium' },
+  { id: 'high', label: 'High' },
+];
+
+function renderPriorityTodoSection(page: PageNode): string {
+  return `<div id="folder-priority-todos" class="folder-priority-todos">${renderPriorityTodoBoard(page)}</div>`;
+}
+
+function renderPriorityTodoBoard(page: PageNode): string {
+  const todos = page.priority_todos || [];
+  if (!todos.length) {
+    return `<div class="folder-todo-empty"><button class="btn btn-sm btn-ghost" onclick="addPriorityTodoBoard()">Add priority to-do list</button></div>`;
+  }
+  return `<div class="priority-board">
+    ${PRIORITY_COLUMNS.map(col => `
+      <section class="priority-note priority-${col.id}" data-priority="${col.id}">
+        <div class="priority-note-head">
+          <span>${col.label}</span>
+          <button class="priority-add-btn" onclick="addPriorityTodo('${col.id}')" title="Add ${col.label.toLowerCase()} task" aria-label="Add ${col.label.toLowerCase()} task">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M 12 5 V 19"/><path d="M 5 12 H 19"/></svg>
+          </button>
+        </div>
+        ${todos.filter(t => t.priority === col.id).map(t => `
+          <div class="priority-item${t.done ? ' done' : ''}" data-todo-id="${esc(t.id)}" draggable="true">
+            <button class="priority-check-btn" onclick="togglePriorityTodo('${t.id}')" title="${t.done ? 'Mark incomplete' : 'Mark complete'}" aria-label="${t.done ? 'Mark incomplete' : 'Mark complete'}">
+              ${t.done ? `<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M 5 12.5 L 10 17 L 19 7"/></svg>` : ''}
+            </button>
+            <button type="button" class="priority-text-btn" draggable="false" onclick="editPriorityTodo('${t.id}')" title="Edit task" aria-label="Edit task">${esc(t.text)}</button>
+            <button class="priority-delete-btn" onclick="deletePriorityTodo('${t.id}')" title="Delete task" aria-label="Delete task">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M 6 6 L 18 18"/><path d="M 6 18 L 18 6"/></svg>
+            </button>
+          </div>
+        `).join('')}
+      </section>
+    `).join('')}
+  </div>`;
+}
+
+async function saveFolderTodos(todos: PriorityTodo[]): Promise<void> {
+  if (!state.currentPage || state.currentPage.type !== 'folder') return;
+  const pageId = state.currentPage.id;
+  state.currentPage.priority_todos = todos;
+  refreshPriorityTodoSection();
+
+  const { page } = await api.updateFolderTodos(pageId, todos);
+  if (!state.currentPage || state.currentPage.id !== pageId) return;
+
+  const savedTodos = page.priority_todos || todos;
+  state.currentPage.priority_todos = savedTodos;
+  state.currentPage.updated_at = page.updated_at;
+
+  const pageInList = state.pages.find(p => p.id === pageId);
+  if (pageInList) {
+    pageInList.priority_todos = savedTodos;
+    pageInList.updated_at = page.updated_at;
+  }
+}
+
+function addPriorityTodoBoard(): void {
+  void saveFolderTodos([
+    { id: uid('todo'), text: 'First task', priority: 'medium', done: false },
+  ]);
+}
+
+function openTextInputModal(title: string, initialValue: string, onSubmit: (value: string) => void): void {
+  const backdrop = document.createElement('div');
+  backdrop.className = 'diagram-modal-backdrop';
+  const form = document.createElement('form');
+  form.className = 'diagram-modal';
+  form.setAttribute('role', 'dialog');
+  form.setAttribute('aria-modal', 'true');
+
+  const heading = document.createElement('h3');
+  heading.textContent = title;
+  const input = document.createElement('input');
+  input.value = initialValue;
+  input.maxLength = 160;
+  const actions = document.createElement('div');
+  actions.className = 'diagram-modal-actions';
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'btn btn-sm btn-ghost';
+  cancel.textContent = 'Cancel';
+  const save = document.createElement('button');
+  save.type = 'submit';
+  save.className = 'btn btn-sm btn-primary';
+  save.textContent = 'Save';
+
+  function close(): void {
+    backdrop.remove();
+  }
+
+  backdrop.addEventListener('mousedown', event => {
+    if (event.target === backdrop) close();
+  });
+  cancel.addEventListener('click', close);
+  form.addEventListener('submit', event => {
+    event.preventDefault();
+    const value = input.value.trim();
+    if (value) onSubmit(value);
+    close();
+  });
+
+  actions.append(cancel, save);
+  form.append(heading, input, actions);
+  backdrop.appendChild(form);
+  document.body.appendChild(backdrop);
+  window.setTimeout(() => {
+    input.focus();
+    input.select();
+  }, 0);
+}
+
+function addPriorityTodo(priority: Priority): void {
+  openTextInputModal('Add Task', '', text => {
+    void saveFolderTodos([...(state.currentPage?.priority_todos || []), { id: uid('todo'), text, priority, done: false }]);
+  });
+}
+
+function editPriorityTodo(id: string): void {
+  const todos = state.currentPage?.priority_todos || [];
+  const todo = todos.find(t => t.id === id);
+  if (!todo) return;
+
+  openTextInputModal('Edit Task', todo.text, text => {
+    if (text === todo.text) return;
+    void saveFolderTodos(todos.map(t => t.id === id ? { ...t, text } : t));
+  });
+}
+
+function togglePriorityTodo(id: string): void {
+  void saveFolderTodos((state.currentPage?.priority_todos || []).map(t => t.id === id ? { ...t, done: !t.done } : t));
+}
+
+function deletePriorityTodo(id: string): void {
+  void saveFolderTodos((state.currentPage?.priority_todos || []).filter(t => t.id !== id));
+}
+
+function movePriorityTodo(id: string, priority: Priority): void {
+  const todos = state.currentPage?.priority_todos || [];
+  if (!todos.some(t => t.id === id && t.priority !== priority)) return;
+  void saveFolderTodos(todos.map(t => t.id === id ? { ...t, priority } : t));
+}
+
+function refreshPriorityTodoSection(): void {
+  if (!state.currentPage || state.currentPage.type !== 'folder') return;
+  const section = document.getElementById('folder-priority-todos');
+  if (!section) return;
+  section.innerHTML = renderPriorityTodoBoard(state.currentPage);
+  setupPriorityTodoDragAndDrop(section);
+}
+
+function setupPriorityTodoDragAndDrop(scope: ParentNode = document): void {
+  const board = scope instanceof HTMLElement && scope.classList.contains('priority-board')
+    ? scope
+    : scope.querySelector?.('.priority-board') as HTMLElement | null;
+  if (!board) return;
+
+  board.querySelectorAll<HTMLElement>('.priority-item').forEach(item => {
+    item.addEventListener('dragstart', event => {
+      const todoId = item.dataset.todoId;
+      if (!todoId || !event.dataTransfer) return;
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', todoId);
+      board.classList.add('is-dragging');
+      item.classList.add('is-dragging');
+    });
+    item.addEventListener('dragend', () => clearPriorityTodoDragState(board));
+  });
+
+  board.querySelectorAll<HTMLElement>('.priority-note').forEach(note => {
+    note.addEventListener('dragover', event => {
+      if (!event.dataTransfer) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      note.classList.add('drag-over');
+    });
+    note.addEventListener('dragleave', event => {
+      const nextTarget = event.relatedTarget;
+      if (!(nextTarget instanceof Node) || !note.contains(nextTarget)) {
+        note.classList.remove('drag-over');
+      }
+    });
+    note.addEventListener('drop', event => {
+      event.preventDefault();
+      const todoId = event.dataTransfer?.getData('text/plain');
+      const priority = note.dataset.priority;
+      clearPriorityTodoDragState(board);
+      if (todoId && isPriority(priority)) movePriorityTodo(todoId, priority);
+    });
+  });
+}
+
+function clearPriorityTodoDragState(board: HTMLElement): void {
+  board.classList.remove('is-dragging');
+  board.querySelectorAll('.priority-item.is-dragging, .priority-note.drag-over')
+    .forEach(el => el.classList.remove('is-dragging', 'drag-over'));
+}
+
+function isPriority(value: string | undefined): value is Priority {
+  return value === 'low' || value === 'medium' || value === 'high';
 }
 
 // ── Assets ────────────────────────────────────────────────────────────────────
@@ -2724,7 +4604,7 @@ function renderUploadZone(pageId: string): string {
       <div class="upload-zone" id="upload-zone-${pageId}" onclick="triggerUpload('${pageId}')">
         <div class="upload-zone-icon">📎</div>
         <div class="upload-zone-text">Drop files here or click to upload</div>
-        <div class="upload-zone-hint">.md and .html files become pages · other files attached as assets</div>
+        <div class="upload-zone-hint">.md, .html, and tool JSON files become pages · other files attach as assets</div>
       </div>
       <input type="file" id="upload-input-${pageId}" multiple style="display:none" onchange="handleFileUpload(event,'${pageId}')">
     </div>
@@ -2756,13 +4636,9 @@ async function uploadFiles(files: FileList, pageId: string): Promise<void> {
 
   const allFiles = Array.from(files);
 
-  // Separate document files (.md, .html) from regular assets
-  const docFiles = allFiles.filter(f =>
-    f.name.endsWith('.md') || f.name.endsWith('.html') || f.name.endsWith('.htm')
-  );
-  const assetFiles = allFiles.filter(f =>
-    !f.name.endsWith('.md') && !f.name.endsWith('.html') && !f.name.endsWith('.htm')
-  );
+  // Separate page files from regular assets.
+  const docFiles = allFiles.filter(isPageUploadFile);
+  const assetFiles = allFiles.filter(f => !isPageUploadFile(f));
 
   // Determine parent folder — if we're viewing a folder, import into it
   const currentPage = state.pages.find(p => p.id === pageId);
@@ -2774,8 +4650,8 @@ async function uploadFiles(files: FileList, pageId: string): Promise<void> {
     for (const f of docFiles) {
       try {
         const content = await f.text();
-        const baseName = f.name.replace(/\.(md|html|htm)$/i, '');
-        const fileType: 'md' | 'html' = f.name.endsWith('.md') ? 'md' : 'html';
+        const baseName = pageUploadBaseName(f.name);
+        const fileType = pageUploadFileType(f);
 
         await api.createPage({
           name: baseName,
@@ -2808,6 +4684,28 @@ async function uploadFiles(files: FileList, pageId: string): Promise<void> {
   }
 
   await renderPage(pageId);
+}
+
+function isPageUploadFile(file: File): boolean {
+  const name = file.name.toLowerCase();
+  return name.endsWith('.md')
+    || name.endsWith('.html')
+    || name.endsWith('.htm')
+    || name.endsWith('.diagram.json')
+    || name.endsWith('.kanban.json')
+    || name.endsWith('.sheet.json');
+}
+
+function pageUploadBaseName(name: string): string {
+  return name.replace(/\.(md|html|htm|diagram\.json|kanban\.json|sheet\.json)$/i, '');
+}
+
+function pageUploadFileType(file: File): NonNullable<PageNode['file_type']> {
+  const name = file.name.toLowerCase();
+  if (name.endsWith('.diagram.json')) return 'diagram';
+  if (name.endsWith('.kanban.json')) return 'kanban';
+  if (name.endsWith('.sheet.json')) return 'sheet';
+  return name.endsWith('.md') ? 'md' : 'html';
 }
 
 let _confirmDeleteResolve: ((v: boolean) => void) | null = null;
@@ -2849,6 +4747,9 @@ function openNewPageModal(defaultType: 'page' | 'folder' | 'image' = 'page', ctx
 
   // If AI not configured, block opening the AI Image type
   if (defaultType === 'image' && !state.aiEnabled) defaultType = 'page';
+  if (defaultType === 'folder' && _ctxFolderId && !canCreateFolderInParent(_ctxFolderId, state.pages)) {
+    defaultType = 'page';
+  }
 
   // Reflect AI availability on the AI Image type-option
   const imageOption = document.getElementById('type-option-image');
@@ -2856,6 +4757,14 @@ function openNewPageModal(defaultType: 'page' | 'folder' | 'image' = 'page', ctx
     imageOption.style.opacity = state.aiEnabled ? '' : '0.4';
     imageOption.style.pointerEvents = state.aiEnabled ? '' : 'none';
     imageOption.title = state.aiEnabled ? '' : 'Configure an AI profile first';
+  }
+
+  const folderOption = document.querySelector<HTMLElement>('.type-option[data-type="folder"]');
+  const canUseFolderType = !_ctxFolderId || canCreateFolderInParent(_ctxFolderId, state.pages);
+  if (folderOption) {
+    folderOption.style.opacity = canUseFolderType ? '' : '0.4';
+    folderOption.style.pointerEvents = canUseFolderType ? '' : 'none';
+    folderOption.title = canUseFolderType ? '' : 'Folders can only be nested one level deep';
   }
 
   $('new-page-overlay').classList.add('open');
@@ -2932,7 +4841,7 @@ function updateTypeOptions(type: string): void {
   $('new-page-template-row').style.display = showTemplate ? '' : 'none';
 
   // Pre-fill with AI: never shown for folders, only shown for pages when AI enabled
-  const showPrefill = !isFolder && !isImage && state.aiEnabled;
+  const showPrefill = !isFolder && !isImage && fileType !== 'diagram' && fileType !== 'kanban' && fileType !== 'sheet' && state.aiEnabled;
   $('new-page-ai-prefill-row').style.display = showPrefill ? '' : 'none';
   if (!showPrefill) $('new-page-ai-section').style.display = 'none';
   // Reset active state when switching types
@@ -2958,6 +4867,10 @@ function updateTypeOptions(type: string): void {
 }
 
 function selectType(type: 'page' | 'folder'): void {
+  if (type === 'folder' && _ctxFolderId && !canCreateFolderInParent(_ctxFolderId, state.pages)) {
+    showToast('Folders can only be nested one level deep', 'error');
+    return;
+  }
   ($('new-page-type') as HTMLSelectElement).value = type;
   updateTypeOptions(type);
 }
@@ -3013,6 +4926,10 @@ async function submitNewPage(): Promise<void> {
 
   if (type === 'folder') {
     if (_ctxFolderId) {
+      if (!canCreateFolderInParent(_ctxFolderId, state.pages)) {
+        showToast('Folders can only be nested one level deep', 'error');
+        return;
+      }
       // Child folder — created inside a specific parent, no auto-prefix
       parentId = _ctxFolderId;
       finalName = rawName;
@@ -3051,6 +4968,8 @@ async function submitNewPage(): Promise<void> {
       } finally {
         hideMascotLoading();
       }
+    } else if (type === 'page') {
+      content = defaultContentForFileType(fileType);
     }
 
     const { page } = await api.createPage({
@@ -3088,6 +5007,7 @@ async function submitNewPage(): Promise<void> {
 function showWelcome(): void {
   // Cancel any pending auto-save and tear down the editor before clearing state
   clearTimeout(saveTimer);
+  disposeReactToolRoots();
   if (state.wysiwyg) {
     try { state.wysiwyg.destroy(); } catch { /* ignore */ }
     state.wysiwyg = null;
@@ -3117,11 +5037,12 @@ function showWelcome(): void {
   const badge = document.getElementById('topbar-badge');
   if (badge) badge.textContent = '';
   const titleEl = document.getElementById('page-title') as HTMLInputElement | null;
-  if (titleEl) titleEl.value = '';
+  if (titleEl) { titleEl.value = ''; titleEl.disabled = false; }
   const bcParent = document.getElementById('bc-parent');
   if (bcParent) bcParent.textContent = 'yoınko';
 
   document.getElementById('html-edit-btn')?.classList.add('hidden');
+  document.getElementById('lock-page-btn')?.classList.add('hidden');
   hideSaveState();
 }
 
@@ -3349,7 +5270,7 @@ function openMoveModal(kind: 'page' | 'asset', id: string): void {
       depth: 0,
       isCurrent: currentParentId === null,
     });
-    for (const f of buildFolderOptionsTree(blocked)) {
+    for (const f of buildFolderOptionsTree(blocked).filter(f => canMovePageToParent(p.id, f.id, state.pages))) {
       options.push({
         value: f.id,
         shortLabel: f.shortLabel,
@@ -3498,13 +5419,16 @@ function showCtxMenu(e: Event, page: PageNode): void {
   items.push({ label: 'Rename', icon: ICON.pencil, onClick: () => renamePagePrompt(page.id, displayName) });
 
   if (page.type === 'folder') {
+    const addSubmenu: CardMenuItem[] = [
+      { label: 'Page', icon: ICON.fileText, onClick: () => openNewPageModal('page', page.id) },
+    ];
+    if (canCreateFolderInParent(page.id, state.pages)) {
+      addSubmenu.push({ label: 'Folder', icon: ICON.folder, onClick: () => openNewPageModal('folder', page.id) });
+    }
     items.push({
       label: 'Add…',
       icon: ICON.plus,
-      submenu: [
-        { label: 'Page', icon: ICON.fileText, onClick: () => openNewPageModal('page', page.id) },
-        { label: 'Folder', icon: ICON.folder, onClick: () => openNewPageModal('folder', page.id) },
-      ],
+      submenu: addSubmenu,
     });
   }
 
@@ -3527,6 +5451,7 @@ function showCtxMenu(e: Event, page: PageNode): void {
 let titleTimer: ReturnType<typeof setTimeout> | undefined;
 
 function onTitleChange(e: Event): void {
+  if (state.currentPage?.locked) return;
   clearTimeout(titleTimer);
   titleTimer = setTimeout(async () => {
     if (!state.currentPageId) return;
@@ -3541,6 +5466,20 @@ function onTitleChange(e: Event): void {
       await loadPages();
     } catch { /* silently fail */ }
   }, 900);
+}
+
+async function togglePageLock(): Promise<void> {
+  if (!state.currentPage || state.currentPage.type !== 'page') return;
+  try {
+    const next = !state.currentPage.locked;
+    const { page } = await api.setPageLocked(state.currentPage.id, next);
+    state.currentPage.locked = page.locked ?? next;
+    updateTopbar(state.currentPage);
+    await renderPage(state.currentPage.id);
+    showToast(next ? 'File locked' : 'File unlocked');
+  } catch (err) {
+    showToast('Lock failed: ' + (err as Error).message, 'error');
+  }
 }
 
 
@@ -4094,7 +6033,7 @@ async function deleteCurrentProfile(): Promise<void> {
   const profile = profilesList.find(p => p.id === selectedProfileId);
   if (!profile) return;
 
-  // Show custom confirmation modal instead of native confirm()
+  // Show a custom confirmation modal.
   const nameEl = document.getElementById('delete-profile-name');
   if (nameEl) nameEl.textContent = `"${profile.name}"`;
   document.getElementById('delete-profile-overlay')?.classList.add('open');
