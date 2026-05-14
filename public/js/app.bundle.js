@@ -72121,14 +72121,61 @@ Error:`,
   }
 
   // src/client/sentry.ts
+  var sentrySearchParams = new URLSearchParams(window.location.search);
   var glitchTipOptions = {
     dsn: "https://d3056766e0c3486ea2af6ba940e2e93e@glitchtip-web-production-ee29.up.railway.app/7",
     tracesSampleRate: 0.01,
     autoSessionTracking: false,
+    enableLogs: true,
+    debug: sentrySearchParams.has("glitchtip-debug"),
+    integrations: [
+      consoleLoggingIntegration({
+        levels: ["log", "info", "warn", "error"]
+      })
+    ],
     release: "yoinko@0.6.0",
     environment: "development"
   };
   init2(glitchTipOptions);
+  function sendGlitchTipTestError(source = "console") {
+    const eventId = captureException(new Error("Test GlitchTip error"), {
+      tags: {
+        verification: "glitchtip",
+        source
+      },
+      extra: {
+        release: "yoinko@0.6.0",
+        environment: "development"
+      }
+    });
+    void flush(2500).then((flushed) => {
+      const status = flushed ? "flushed" : "queued";
+      console.info(`[GlitchTip] Test error ${status}. Event ID: ${eventId}`);
+    });
+    return eventId;
+  }
+  function sendGlitchTipTestLog(source = "console") {
+    const message = "Test GlitchTip log";
+    public_api_exports.info(message, {
+      environment: "development",
+      release: "yoinko@0.6.0",
+      source,
+      verification: "glitchtip"
+    });
+    void flush(2500).then((flushed) => {
+      const status = flushed ? "flushed" : "queued";
+      console.info(`[GlitchTip] Test log ${status}.`);
+    });
+    return message;
+  }
+  window.testGlitchTip = () => sendGlitchTipTestError("console");
+  window.testGlitchTipLog = () => sendGlitchTipTestLog("console");
+  if (sentrySearchParams.has("glitchtip-test")) {
+    window.setTimeout(() => sendGlitchTipTestError("query-param"), 0);
+  }
+  if (sentrySearchParams.has("glitchtip-log-test")) {
+    window.setTimeout(() => sendGlitchTipTestLog("query-param"), 0);
+  }
 
   // src/client/app.ts
   var import_react14 = __toESM(require_react(), 1);
