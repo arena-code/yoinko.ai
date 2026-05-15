@@ -1,4 +1,6 @@
 // src/server/index.ts — Express app entry point
+// Sentry init must come first so its OTel instrumentation patches Express/http.
+import { Sentry } from './sentry.js';
 import express from 'express';
 import path from 'path';
 import cors from 'cors';
@@ -152,6 +154,9 @@ app.get('/api/me/team', async (req, res) => {
 app.get('*', (_req, res) => {
   res.sendFile(path.join(publicDir, 'index.html'));
 });
+
+// ── Sentry Express error handler (must be after routes) ───────────────────────
+Sentry.setupExpressErrorHandler(app);
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 const server = app.listen(PORT, () => {

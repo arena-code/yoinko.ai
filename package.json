@@ -19,8 +19,8 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@google/generative-ai": "^0.24.0",
-    "@sentry/browser": "^10.53.1",
     "@sentry/node": "^10.53.1",
+    "@sentry/react": "^10.53.1",
     "@tiptap/core": "^3.22.4",
     "@tiptap/extension-placeholder": "^3.22.4",
     "@tiptap/extension-table": "^3.22.4",
