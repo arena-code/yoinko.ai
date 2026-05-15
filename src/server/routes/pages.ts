@@ -24,6 +24,7 @@ import {
 import { canCreateFolderInParent, canMovePageToParent } from '../../shared/page-depth.js';
 import type { PageNode, Asset, PriorityTodo } from '../../shared/types.js';
 import { projectId, dataDir } from '../request-helpers.js';
+import { posthog, getDistinctId } from '../posthog.js';
 
 const router = express.Router();
 
@@ -173,8 +174,16 @@ router.put('/:id/share', (req: Request, res: Response) => {
     }
 
     const share = upsertPageShare(db, pid, page.id, page.path, passwordUpdate);
+
+    posthog?.capture({
+      distinctId: getDistinctId(req),
+      event: 'page_shared',
+      properties: { password_protected: !!password_protected, project_id: pid },
+    });
+
     res.json({ share: shareInfoFromRecord(share, shareUrl(req, share.token)) });
   } catch (err) {
+    posthog?.captureException(err, getDistinctId(req));
     res.status(500).json({ error: (err as Error).message });
   }
 });
@@ -189,8 +198,16 @@ router.delete('/:id/share', (req: Request, res: Response) => {
     if (!page || page.type !== 'page') return void res.status(404).json({ error: 'Page not found' });
 
     deletePageShare(getGlobalDb(dataDir(req)), pid, page.id);
+
+    posthog?.capture({
+      distinctId: getDistinctId(req),
+      event: 'page_unshared',
+      properties: { project_id: pid },
+    });
+
     res.json({ share: { enabled: false } });
   } catch (err) {
+    posthog?.captureException(err, getDistinctId(req));
     res.status(500).json({ error: (err as Error).message });
   }
 });
@@ -234,8 +251,15 @@ router.post('/', (req: Request, res: Response) => {
     const flat = flattenTree(scanDir(pagesDir));
     const page = flat.find(p => p.id === id);
 
+    posthog?.capture({
+      distinctId: getDistinctId(req),
+      event: 'page_created',
+      properties: { type, file_type: file_type ?? 'md', project_id: pid },
+    });
+
     res.status(201).json({ page: page ?? { id, path: relPath, type, name } });
   } catch (err) {
+    posthog?.captureException(err, getDistinctId(req));
     res.status(500).json({ error: (err as Error).message });
   }
 });
@@ -309,8 +333,19 @@ router.put('/:id', (req: Request, res: Response) => {
 
     const flat = flattenTree(scanDir(pagesDir));
     const page = flat.find(p => p.id === req.params.id as string);
+
+    posthog?.capture({
+      distinctId: getDistinctId(req),
+      event: 'page_updated',
+      properties: {
+        update_type: name !== undefined ? 'rename' : 'content',
+        project_id: pid,
+      },
+    });
+
     res.json({ page: page ?? { id: req.params.id as string } });
   } catch (err) {
+    posthog?.captureException(err, getDistinctId(req));
     res.status(500).json({ error: (err as Error).message });
   }
 });
@@ -379,8 +414,16 @@ router.delete('/:id', (req: Request, res: Response) => {
       .map(p => p.id);
     deletePath(pagesDir, relPath);
     deletePageSharesForIds(getGlobalDb(dd), pid, pageIdsToDelete);
+
+    posthog?.capture({
+      distinctId: getDistinctId(req),
+      event: 'page_deleted',
+      properties: { project_id: pid },
+    });
+
     res.json({ success: true });
   } catch (err) {
+    posthog?.captureException(err, getDistinctId(req));
     res.status(500).json({ error: (err as Error).message });
   }
 });

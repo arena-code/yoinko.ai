@@ -4,6 +4,13 @@
 
 import { Router } from 'express';
 import { clearAuthCookies, setAuthCookies } from '../auth-cookies.js';
+import { posthog } from '../posthog.js';
+
+function decodeJwtPayload(token: string): { sub?: string; email?: string } {
+  try {
+    return JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString());
+  } catch { return {}; }
+}
 
 const router = Router();
 
@@ -30,15 +37,30 @@ router.post('/set-token', (req, res) => {
 
   setAuthCookies(res, access_token, refresh_token);
 
+  const payload = decodeJwtPayload(access_token);
+  if (posthog && payload.sub) {
+    posthog.identify({ distinctId: payload.sub, properties: { email: payload.email } });
+    posthog.capture({ distinctId: payload.sub, event: 'user_signed_in', properties: { method: 'token' } });
+  }
+
   res.json({ ok: true });
 });
 
 // ── POST /auth/logout — Clear ALL auth cookies ──────────────────────────────
 router.post('/logout', (req, res) => {
+  const cookieHeader = req.headers.cookie || '';
+
+  // Extract user id from cookie token for analytics before clearing
+  const yoinkoMatch = cookieHeader.match(/yoinko_token=([^;]+)/);
+  const tokenForAnalytics = yoinkoMatch?.[1];
+  const analyticsId = tokenForAnalytics ? decodeJwtPayload(tokenForAnalytics).sub : undefined;
+  if (posthog && analyticsId) {
+    posthog.capture({ distinctId: analyticsId, event: 'user_signed_out' });
+  }
+
   clearAuthCookies(res);
 
   // Clear any Supabase SSR cookies (sb-<ref>-auth-token and chunked variants)
-  const cookieHeader = req.headers.cookie || '';
   const cookieNames = cookieHeader.split(';').map(c => c.trim().split('=')[0]).filter(Boolean);
   for (const name of cookieNames) {
     if (name.match(/^sb-[^-]+-auth-token/)) {

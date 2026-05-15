@@ -3,6 +3,7 @@ import express, { Request, Response } from 'express';
 import { getGlobalDb } from '../db.js';
 import type { Settings, LLMProfile, MdTemplate } from '../../shared/types.js';
 import { dataDir } from '../request-helpers.js';
+import { posthog, getDistinctId } from '../posthog.js';
 
 const router = express.Router();
 
@@ -132,8 +133,15 @@ router.put('/profiles', (req: Request, res: Response) => {
       upsertSetting(db, 'llm_active_profile', profiles[0].id);
     }
 
+    posthog?.capture({
+      distinctId: getDistinctId(req),
+      event: 'llm_profile_configured',
+      properties: { provider: incoming.provider, is_new: idx < 0 },
+    });
+
     res.json({ success: true, profile: { ...profiles.find(p => p.id === incoming.id)!, api_key: '' } });
   } catch (err) {
+    posthog?.captureException(err, getDistinctId(req));
     res.status(500).json({ error: (err as Error).message });
   }
 });

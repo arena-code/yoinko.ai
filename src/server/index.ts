@@ -15,6 +15,7 @@ import shareRouter from './routes/share.js';
 import { migrateOnStartup } from './projects.js';
 import { cloudAuth, invalidateTenantCache } from './middleware/cloud-auth.js';
 import { workspaceAccessCheck } from './middleware/workspace-auth.js';
+import { posthog } from './posthog.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -182,7 +183,8 @@ const server = app.listen(PORT, () => {
 // ── Graceful shutdown (prevents tsx "Force killing" warning) ──────────────────
 function shutdown(signal: string) {
   console.log(`\n  Received ${signal}, shutting down…`);
-  server.close(() => {
+  server.close(async () => {
+    await posthog?.shutdown();
     console.log('  Server closed.');
     process.exit(0);
   });

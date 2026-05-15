@@ -10,6 +10,7 @@ import {
 } from '../projects.js';
 import { evictProjectDb, getGlobalDb } from '../db.js';
 import { dataDir } from '../request-helpers.js';
+import { posthog, getDistinctId } from '../posthog.js';
 import { getWorkspaceLimit } from '../storage.js';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -71,8 +72,16 @@ router.post('/', (req: Request, res: Response) => {
     }
 
     const project = createProject(name.trim(), dd);
+
+    posthog?.capture({
+      distinctId: getDistinctId(req),
+      event: 'project_created',
+      properties: { project_id: project.id },
+    });
+
     res.status(201).json({ project });
   } catch (err) {
+    posthog?.captureException(err, getDistinctId(req));
     res.status(500).json({ error: (err as Error).message });
   }
 });
@@ -112,8 +121,16 @@ router.delete('/:id', (req: Request, res: Response) => {
     const dd = dataDir(req);
     deleteProject(id, dd);
     evictProjectDb(id, dd);
+
+    posthog?.capture({
+      distinctId: getDistinctId(req),
+      event: 'project_deleted',
+      properties: { project_id: id },
+    });
+
     res.json({ success: true });
   } catch (err) {
+    posthog?.captureException(err, getDistinctId(req));
     res.status(400).json({ error: (err as Error).message });
   }
 });

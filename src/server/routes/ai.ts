@@ -8,6 +8,7 @@ import { getProjectDirs } from '../projects.js';
 import { generateText, streamText, generateImage } from '../ai/index.js';
 import type { LLMMessage, ChatMessage } from '../../shared/types.js';
 import { projectId, dataDir } from '../request-helpers.js';
+import { posthog, getDistinctId } from '../posthog.js';
 
 const router = express.Router();
 const now = () => new Date().toISOString();
@@ -87,9 +88,16 @@ router.post('/chat', async (req: Request, res: Response) => {
         .run(uuidv4(), page_id, 'assistant', fullReply, now());
     }
 
+    posthog?.capture({
+      distinctId: getDistinctId(req),
+      event: 'ai_chat_message_sent',
+      properties: { message_count: messages.length, has_page_context: !!page_id, project_id: pid },
+    });
+
     send({ type: 'done' });
     res.end();
   } catch (err) {
+    posthog?.captureException(err, getDistinctId(req));
     console.error('AI chat error:', (err as Error).message);
     send({ type: 'error', error: (err as Error).message });
     res.end();
@@ -123,6 +131,11 @@ router.post('/image', async (req: Request, res: Response) => {
       db.prepare(`INSERT INTO assets (id, page_id, filename, original_name, mime_type, size, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
         .run(id, page_id ?? null, filename, `ai-${filename}`, 'image/png', buffer.length, ts);
 
+      posthog?.capture({
+        distinctId: getDistinctId(req),
+        event: 'ai_image_generated',
+        properties: { provider: 'openai', project_id: projectId(req) },
+      });
       return void res.json({ asset: { id, filename, url: `/api/assets/${id}/file`, original_name: `ai-${filename}`, mime_type: 'image/png' } });
     }
 
@@ -138,11 +151,17 @@ router.post('/image', async (req: Request, res: Response) => {
       db.prepare(`INSERT INTO assets (id, page_id, filename, original_name, mime_type, size, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
         .run(id, page_id ?? null, filename, `ai-image-${Date.now()}.png`, 'image/png', buffer.length, ts);
 
+      posthog?.capture({
+        distinctId: getDistinctId(req),
+        event: 'ai_image_generated',
+        properties: { provider: 'gemini', project_id: projectId(req) },
+      });
       return void res.json({ asset: { id, filename, url: `/api/assets/${id}/file`, original_name: 'ai-image.png', mime_type: 'image/png' } });
     }
 
     res.status(500).json({ error: 'Unknown image format from provider' });
   } catch (err) {
+    posthog?.captureException(err, getDistinctId(req));
     console.error('AI image error:', (err as Error).message);
     res.status(500).json({ error: (err as Error).message });
   }

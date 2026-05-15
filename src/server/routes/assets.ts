@@ -8,6 +8,7 @@ import { getGlobalDb, getProjectDb } from '../db.js';
 import { getProjectDirs, listProjects } from '../projects.js';
 import type { Asset } from '../../shared/types.js';
 import { projectId, dataDir } from '../request-helpers.js';
+import { posthog, getDistinctId } from '../posthog.js';
 import { getTenantUsedBytes, getStorageLimit } from '../storage.js';
 import {
   deleteAssetShare,
@@ -137,8 +138,19 @@ router.post('/upload', quotaCheck, upload.array('files', 20), (req: Request, res
       });
     }
 
+    posthog?.capture({
+      distinctId: getDistinctId(req),
+      event: 'asset_uploaded',
+      properties: {
+        file_count: results.length,
+        total_size_bytes: results.reduce((s, a) => s + (a.size ?? 0), 0),
+        project_id: projectId(req),
+      },
+    });
+
     res.status(201).json({ assets: results });
   } catch (err) {
+    posthog?.captureException(err, getDistinctId(req));
     res.status(500).json({ error: (err as Error).message });
   }
 });
@@ -338,8 +350,16 @@ router.delete('/:id', (req: Request, res: Response) => {
 
     db.prepare(`DELETE FROM assets WHERE id = ?`).run(req.params.id as string);
     deleteAssetShare(getGlobalDb(dd), pid, asset.id);
+
+    posthog?.capture({
+      distinctId: getDistinctId(req),
+      event: 'asset_deleted',
+      properties: { mime_type: asset.mime_type, project_id: pid },
+    });
+
     res.json({ success: true });
   } catch (err) {
+    posthog?.captureException(err, getDistinctId(req));
     res.status(500).json({ error: (err as Error).message });
   }
 });

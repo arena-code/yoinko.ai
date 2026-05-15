@@ -19,7 +19,8 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@google/generative-ai": "^0.24.0",
-    "@sentry/react": "^10.53.1",
+    "@sentry/browser": "^10.53.1",
+    "@sentry/node": "^10.53.1",
     "@tiptap/core": "^3.22.4",
     "@tiptap/extension-placeholder": "^3.22.4",
     "@tiptap/extension-table": "^3.22.4",
@@ -38,6 +39,7 @@
     "jspreadsheet-ce": "^5.0.4",
     "multer": "^1.4.5-lts.2",
     "openai": "^4.91.1",
+    "posthog-node": "^5.34.1",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-kanban-kit": "^0.0.2-beta.7",
